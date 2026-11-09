@@ -1,0 +1,22 @@
+# Secrets must never be committed
+.env
+.env.*
+*.key
+*.pem
+secrets.*
+credentials.*
+
+# Real harness logs must never be committed (fixtures must be anonymized)
+*.jsonl
+!test/fixtures/**/*.jsonl
+
+# OS / editor
+.DS_Store
+
+# Build output and dependencies
+node_modules/
+dist/
+
+# Agent harness working directories (local only)
+.agents/
+.claude/

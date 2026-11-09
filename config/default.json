@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "logRoots": {
+    "claudeCode": ["~/.claude/projects"],
+    "antigravity": ["~/.gemini/antigravity/brain"],
+    "codex": ["~/.codex/sessions"],
+    "opencode": ["~/.local/share/opencode"]
+  },
+  "sessionIndexRoots": {
+    "claudeCode": ["~/Library/Application Support/Claude/claude-code-sessions"],
+    "antigravity": ["~/.gemini/antigravity/annotations"],
+    "codex": [],
+    "opencode": []
+  },
+  "usage": {
+    "timeZone": "system"
+  },
+  "liveView": {
+    "openWithinSeconds": 1800
+  },
+  "cache": {
+    "fullMissMinContextTokens": 20000,
+    "hitToleranceTokens": 1024,
+    "survivedMinCacheReadShare": 0.75,
+    "lifetimeBandEdgesSeconds": [60, 300, 900, 1800, 3600, 7200, 21600, 86400],
+    "minLifetimeObservations": 20,
+    "declaredLifetimeSeconds": {
+      "claudeCode": {},
+      "antigravity": {},
+      "codex": {},
+      "opencode": {}
+    },
+    "referenceLifetimeSeconds": {
+      "claudeCode": 300,
+      "antigravity": 300,
+      "codex": 300,
+      "opencode": 300
+    }
+  },
+  "models": {
+    "assumed": {}
+  },
+  "rules": {
+    "freshSession": { "minSessions": 5 },
+    "sessionAdvice": {
+      "minCompactions": 5,
+      "minSessions": 5,
+      "contextBandEdgesTokens": [50000, 100000, 200000, 500000],
+      "recentTurnsWindow": 5,
+      "weights": {
+        "cacheRead": 0.1,
+        "inputUncached": 1,
+        "cacheWrite": 1.25,
+        "output": 5
+      }
+    }
+  },
+  "pricing": {
+    "currency": "USD",
+    "displayDecimals": 2,
+    "models": {
+      "claude-fable-5-1": {
+        "effectiveDate": "2026-11-01",
+        "tiers": [
+          {
+            "minContextTokens": 0,
+            "inputPerMillionTokens": 10,
+            "outputPerMillionTokens": 50,
+            "cacheReadPerMillionTokens": 0.25,
+            "cacheWritePerMillionTokensByTtlSeconds": {
+              "300": 12.5,
+              "3600": 20
+            }
+          }
+        ]
+      },
+      "claude-opus-5-5": {
+        "effectiveDate": "2026-11-01",
+        "tiers": [
+          {
+            "minContextTokens": 0,
+            "inputPerMillionTokens": 4,
+            "outputPerMillionTokens": 20,
+            "cacheReadPerMillionTokens": 0.2,
+            "cacheWritePerMillionTokensByTtlSeconds": {
+              "300": 5,
+              "3600": 8
+            }
+          }
+        ]
+      },
+      "gemini-4-argon": {
+        "effectiveDate": "2026-11-01",
+        "tiers": [
+          {
+            "minContextTokens": 0,
+            "inputPerMillionTokens": 2,
+            "outputPerMillionTokens": 10,
+            "cacheReadPerMillionTokens": 0.1,
+            "cacheWritePerMillionTokensByTtlSeconds": {}
+          }
+        ],
+        "changes": [
+          {
+            "effectiveDate": "2026-12-01",
+            "tiers": [
+              {
+                "minContextTokens": 0,
+                "inputPerMillionTokens": 4,
+                "outputPerMillionTokens": 20,
+                "cacheReadPerMillionTokens": 0.2,
+                "cacheWritePerMillionTokensByTtlSeconds": {}
+              }
+            ]
+          }
+        ]
+      },
+      "claude-sonnet-5-5": {
+        "effectiveDate": "2026-11-01",
+        "tiers": [
+          {
+            "minContextTokens": 0,
+            "inputPerMillionTokens": 2,
+            "outputPerMillionTokens": 10,
+            "cacheReadPerMillionTokens": 0.1,
+            "cacheWritePerMillionTokensByTtlSeconds": {
+              "300": 2.5,
+              "3600": 4
+            }
+          }
+        ]
+      },
+      "claude-haiku-5-5": {
+        "effectiveDate": "2026-11-01",
+        "tiers": [
+          {
+            "minContextTokens": 0,
+            "inputPerMillionTokens": 0.1,
+            "outputPerMillionTokens": 0.5,
+            "cacheReadPerMillionTokens": 0.01,
+            "cacheWritePerMillionTokensByTtlSeconds": {
+              "300": 0.125,
+              "3600": 0.2
+            }
+          },
+          {
+            "minContextTokens": 100001,
+            "inputPerMillionTokens": 0.5,
+            "outputPerMillionTokens": 2.5,
+            "cacheReadPerMillionTokens": 0.05,
+            "cacheWritePerMillionTokensByTtlSeconds": {
+              "300": 0.625,
+              "3600": 1
+            }
+          }
+        ]
+      }
+    }
+  },
+  "ui": {
+    "pollIntervalSeconds": 5,
+    "usageRangesDays": [7, 30],
+    "subagentRowsShown": 10
+  }
+}

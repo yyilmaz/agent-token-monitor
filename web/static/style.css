@@ -1,0 +1,326 @@
+/* Colors come from variables, light and dark by prefers-color-scheme (ADR 0013). In VS Code they map to theme variables. */
+:root {
+  --bg: #fbfbfa;
+  --surface: #ffffff;
+  --text: #1d1d1f;
+  --muted: #6b6b70;
+  --border: #e3e3e0;
+  --accent: #2f5bd3;
+  --good: #1f7a4d;
+  --warn: #9a6200;
+  --bad: #b3261e;
+  --chip: #f0f0ee;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #151517;
+    --surface: #1d1d20;
+    --text: #ececef;
+    --muted: #9a9aa2;
+    --border: #2e2e33;
+    --accent: #8aa8ff;
+    --good: #5cc28f;
+    --warn: #e0a64a;
+    --bad: #ff7b72;
+    --chip: #2a2a2f;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.top h1 { margin: 0; font-size: 16px; }
+
+#tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+
+#tabs a {
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+#tabs a[aria-current="page"] { background: var(--chip); color: var(--text); }
+
+#status { margin: 0 0 0 auto; font-size: 12px; }
+
+main { padding: 20px 24px 48px; max-width: 1280px; }
+
+h2 { font-size: 15px; margin: 24px 0 8px; }
+h2:first-child { margin-top: 0; }
+
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.card .label { color: var(--muted); font-size: 12px; }
+.card .value { font-size: 22px; font-variant-numeric: tabular-nums; margin: 2px 0; }
+
+.table-wrap { overflow-x: auto; }
+
+table { border-collapse: collapse; width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+
+th, td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
+
+th { font-weight: 600; font-size: 12px; color: var(--muted); }
+
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+tr:last-child td { border-bottom: none; }
+
+a { color: var(--accent); }
+
+.badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--chip); }
+.badge.good { color: var(--good); }
+.badge.warn { color: var(--warn); }
+.badge.bad { color: var(--bad); }
+
+.alert { border-left: 3px solid var(--bad); }
+.recommendation { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 4px; }
+
+.controls { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+
+select, button {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+
+.error { color: var(--bad); }
+
+/* Usage charts (uPlot, ADR 0005): small multiples, one measure each, so no chart needs a second axis. */
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin: 12px 0 20px; }
+.chart { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 8px 4px; min-width: 0; }
+.chart .uplot { font-family: inherit; }
+.chart .u-legend { font-size: 12px; color: var(--muted); }
+
+/* Session tree (TREE-1, ADR 0016): indentation by depth, without inline styles (CSP). */
+.tree { display: inline-block; }
+.tree[data-depth="1"] { padding-left: 16px; }
+.tree[data-depth="2"] { padding-left: 32px; }
+.tree[data-depth="3"] { padding-left: 48px; }
+.tree[data-depth="4"] { padding-left: 64px; }
+.tree[data-depth="5"] { padding-left: 80px; }
+.tree[data-depth="6"] { padding-left: 96px; }
+
+/* Cache view: kept/lost bars per pause length. <progress> carries the ratio, since the CSP forbids inline widths. */
+.facts { margin: 8px 0 12px; }
+.bands-title { margin-bottom: 4px; }
+.bands { display: grid; grid-template-columns: max-content 1fr max-content; gap: 4px 10px; align-items: center; font-size: 13px; }
+progress.kept { appearance: none; -webkit-appearance: none; width: 100%; height: 8px; border: none; border-radius: 4px; background: var(--bad); overflow: hidden; }
+progress.kept::-webkit-progress-bar { background: var(--bad); }
+progress.kept::-webkit-progress-value { background: var(--good); }
+progress.kept::-moz-progress-bar { background: var(--good); }
+.whatif { display: grid; grid-template-columns: 1fr max-content; gap: 6px 10px; align-items: center; font-size: 13px; margin-bottom: 8px; }
+details summary { cursor: pointer; color: var(--muted); }
+details table { margin-top: 6px; }
+.advice-wrap { white-space: normal; max-width: 380px; line-height: 1.35; }
+.advice-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.advice-wrap details { margin-top: 4px; white-space: normal; }
+.advice-wrap details p { margin: 4px 0; }
+.tool-tag { display: inline-block; padding: 1px 6px; margin: 1px 4px 1px 0; border-radius: 4px; font-size: 11px; background: var(--chip); color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tools-cell { white-space: normal; max-width: 340px; }
+th.has-help { position: relative; cursor: help; }
+.col-help { color: var(--muted); font-weight: 400; font-size: 11px; }
+.col-tip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  width: 250px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+}
+th.num .col-tip { left: auto; right: 0; }
+th.has-help:hover .col-tip, .col-help:focus .col-tip { display: block; }
+tr.compaction-row td {
+  background: color-mix(in srgb, var(--warn) 14%, var(--surface));
+  font-weight: 600;
+}
+tr.compaction-row td:first-child {
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+tr.loss-row td {
+  background: color-mix(in srgb, var(--bad) 11%, var(--surface));
+}
+tr.loss-row td:first-child {
+  box-shadow: inset 3px 0 0 var(--bad);
+}
+.col-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.col-toggle {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+.col-toggle.active {
+  background: var(--chip);
+  font-weight: 500;
+}
+.col-toggle.off {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+.col-toggle.reset {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.card h3 { font-size: 15px; margin: 4px 0 2px; }
+.whatif .badge { justify-self: end; }
+.bands-title { margin-top: 10px; }
+.controls button { white-space: nowrap; }
+.promise { margin: 6px 0 2px; font-size: 13px; }
+
+/* Usage summary (R-33): one number, one chart, then where it went; the full tables sit under Details. */
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.segmented button { border: none; border-radius: 0; padding: 4px 12px; background: var(--surface); color: var(--muted); cursor: pointer; }
+.segmented button + button { border-left: 1px solid var(--border); }
+.segmented button[aria-pressed="true"] { background: var(--chip); color: var(--text); }
+.usage-top { display: grid; grid-template-columns: minmax(260px, 1fr) 2fr; gap: 12px; align-items: stretch; }
+@media (max-width: 760px) { .usage-top { grid-template-columns: 1fr; } }
+.hero .big { font-size: 40px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; margin: 4px 0 8px; }
+.efficiency { margin: 14px 0 4px; }
+.section-head { display: flex; align-items: center; gap: 12px; margin: 24px 0 8px; }
+.section-head h2 { margin: 0; }
+.shares { display: grid; grid-template-columns: minmax(120px, max-content) 1fr max-content max-content max-content; gap: 6px 12px; align-items: center; }
+.shares .num { text-align: right; font-variant-numeric: tabular-nums; }
+progress.share { appearance: none; -webkit-appearance: none; width: 100%; height: 8px; border: none; border-radius: 4px; background: var(--chip); overflow: hidden; }
+progress.share::-webkit-progress-bar { background: var(--chip); }
+progress.share::-webkit-progress-value { background: var(--series-1); }
+progress.share::-moz-progress-bar { background: var(--series-1); }
+.usage-details { margin-top: 24px; }
+.usage-details > summary { margin-bottom: 12px; }
+.sources { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-left: auto; }
+.dot { margin-right: 2px; }
+.dot.good { color: var(--good); }
+.chosen td { font-weight: 600; }
+.chart-card { min-width: 0; }
+.chart-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 6px; }
+progress.share.series-2::-webkit-progress-value { background: var(--series-2); }
+progress.share.series-2::-moz-progress-bar { background: var(--series-2); }
+progress.share.series-3::-webkit-progress-value { background: var(--series-3); }
+progress.share.series-3::-moz-progress-bar { background: var(--series-3); }
+progress.share.series-4::-webkit-progress-value { background: var(--series-4); }
+progress.share.series-4::-moz-progress-bar { background: var(--series-4); }
+
+/* Session summary card mini diagrams (pure SVG, CSP-safe without inline styles). */
+.mini-viz { margin: 6px 0; }
+.mini-svg { display: block; width: 100%; height: 36px; overflow: visible; }
+.mini-stack-svg { display: block; width: 100%; height: 10px; border-radius: 3px; overflow: hidden; }
+.mini-bar { fill: color-mix(in srgb, var(--accent) 55%, var(--surface)); transition: opacity 0.15s; }
+.mini-bar.latest { fill: var(--accent); }
+.mini-bar.warn { fill: var(--warn); }
+.mini-bar.bad { fill: var(--bad); }
+.mini-bar:hover, .mini-seg:hover, .mini-hbar:hover { opacity: 0.8; }
+.mini-ref-line { stroke: var(--muted); stroke-width: 1; opacity: 0.7; }
+.mini-compact-line { stroke: var(--warn); stroke-width: 1.4; }
+.mini-area { fill: color-mix(in srgb, var(--accent) 16%, transparent); }
+.mini-line { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.mini-dot { fill: var(--accent); }
+.mini-seg.seg-cache { fill: var(--series-3); }
+.mini-seg.seg-new { fill: var(--series-1); }
+.mini-seg.seg-write { fill: var(--series-4); }
+.mini-seg.seg-out { fill: var(--series-2); }
+.mini-seg.seg-sub { fill: var(--accent); }
+.mini-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; font-size: 11px; color: var(--muted); }
+.mini-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+.mini-swatch { display: inline-block; width: 7px; height: 7px; border-radius: 2px; }
+.mini-swatch.seg-cache { background: var(--series-3); }
+.mini-swatch.seg-new { background: var(--series-1); }
+.mini-swatch.seg-write { background: var(--series-4); }
+.mini-swatch.seg-out { background: var(--series-2); }
+.mini-swatch.seg-sub { background: var(--accent); }
+.mini-hbar.main { fill: var(--series-1); }
+.mini-hbar.good { fill: var(--good); }
+.mini-hbar.muted-bar { fill: color-mix(in srgb, var(--muted) 45%, var(--surface)); }
+.mini-svg-label { fill: var(--muted); font-size: 10px; }
+.mini-svg-val { fill: var(--text); font-size: 10px; font-variant-numeric: tabular-nums; }
+.mini-swatch.bad-swatch { background: var(--bad); }
+
+/* Expandable Active window avg card and full-width interactive trajectory chart. */
+.expandable-card { cursor: pointer; position: relative; transition: border-color 0.15s, box-shadow 0.15s; }
+.expandable-card:hover { border-color: var(--accent); }
+.expandable-card.is-expanded { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.expand-hint { display: inline-block; margin-top: 3px; font-size: 11px; color: var(--accent); }
+.trajectory-panel { margin-top: 12px; padding: 14px 16px; }
+.trajectory-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 10px; }
+.trajectory-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.trajectory-svg { display: block; width: 100%; height: auto; max-height: 260px; overflow: visible; user-select: none; }
+.traj-grid { stroke: var(--border); stroke-width: 1; }
+.traj-axis-label { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.traj-active-band { fill: color-mix(in srgb, var(--accent) 5%, transparent); }
+.traj-compact-line { stroke: var(--warn); stroke-width: 1.5; }
+.traj-compact-label { fill: var(--warn); font-size: 10px; font-weight: 600; }
+.traj-alltime-line { stroke: var(--muted); stroke-width: 1.2; opacity: 0.7; }
+.traj-active-avg-line { stroke: var(--accent); stroke-width: 1.5; }
+.traj-ref-label { fill: var(--accent); font-size: 10px; font-weight: 500; }
+.traj-ref-label.muted-label { fill: var(--muted); }
+.traj-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.traj-dot { fill: var(--accent); }
+.traj-dot.warn { fill: var(--warn); }
+.traj-dot.bad { fill: var(--bad); }
+.traj-crosshair { stroke: var(--muted); stroke-width: 1; pointer-events: none; }
+.traj-ring { fill: none; stroke: var(--text); stroke-width: 1.8; pointer-events: none; }
+.traj-hit { fill: transparent; cursor: pointer; }
+.traj-inspector { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--chip); }
+.traj-inspector-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.traj-inspector-actions { display: flex; align-items: center; gap: 8px; }
+.traj-inspector-grid { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+tr.flash-row td { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); transition: background 0.3s; }
