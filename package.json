@@ -5,6 +5,24 @@
   "description": "Local, deterministic view of where AI coding agent tokens go, computed from the logs already on disk.",
   "license": "MIT",
   "author": "Yusuf Yılmaz",
+  "homepage": "https://github.com/yyilmaz/agent-token-monitor#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yyilmaz/agent-token-monitor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yyilmaz/agent-token-monitor/issues"
+  },
+  "keywords": [
+    "ai-agents",
+    "token-usage",
+    "prompt-cache",
+    "claude-code",
+    "codex",
+    "antigravity",
+    "dashboard",
+    "local-first"
+  ],
   "type": "module",
   "engines": {
     "node": ">=22.12"

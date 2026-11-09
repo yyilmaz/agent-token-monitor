@@ -6,6 +6,21 @@
 
 ---
 
+## Quick start
+
+Requires macOS and Node.js 22.12 or newer. There is no package to install: clone the repository and run it.
+
+```bash
+git clone https://github.com/yyilmaz/agent-token-monitor.git
+cd agent-token-monitor
+npm ci
+npm start
+```
+
+`npm start` builds the project and serves the dashboard on `http://127.0.0.1:4317`. Nothing is written to your harness directories and nothing leaves your machine. For another port, a custom log location or a JSON overview without the server, see [Contributing](#contributing) and [docs/configuration.md](docs/configuration.md).
+
+---
+
 ## Why this exists
 
 A coding agent can re-read a long session after its prompt cache expires. Compaction adds a summarization request and may require the agent to re-read files. Token counts alone do not tell you which of these happened.
@@ -98,7 +113,7 @@ Open questions are tracked in [SRS section 4](docs/SRS.md#4-open-questions); tec
 
 ## Contributing
 
-New harness support starts with an adapter, a few anonymized fixture log files and tests that pin the normalization.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and [SECURITY.md](SECURITY.md) for reporting vulnerabilities. New harness support starts with an adapter, a few anonymized fixture log files and tests that pin the normalization.
 
 Run the following commands from the repository root. The standalone dashboard supports macOS and requires Node.js 22.12 or newer. For other platforms or custom log locations, set the paths in your [user configuration](docs/configuration.md).
 
