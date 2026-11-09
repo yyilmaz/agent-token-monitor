@@ -101,7 +101,7 @@ npm start       # builds, then serves the dashboard on 127.0.0.1:4317 and prints
 npm run status  # prints the current overview JSON (Now + ADVICE-1 + WORKFLOW-1) to stdout and exits
 ```
 
-GitHub CI runs the build and tests on macOS with the minimum supported Node.js version. It audits the npm lockfile and fails on high or critical advisories. Dependabot checks npm packages and GitHub Actions weekly. The vendored uPlot files are maintained separately from the npm lockfile.
+GitHub CI runs the build and tests on macOS with the minimum supported Node.js version. It audits the npm lockfile and fails on high or critical advisories. Gitleaks scans the checked-out Git history on pull requests and pushes to `main`, with detected secret values redacted in CI logs (R-13). Dependabot checks npm packages and GitHub Actions weekly. The vendored uPlot files are maintained separately from the npm lockfile.
 
 `npm start` serves on port 4317; for another port (or `--port 0`, a free port chosen by the operating system) run `npm run build && node dist/src/hosts/node/main.js --port 8080`; `--config <path>` selects a user configuration file; `--status` prints the JSON overview and exits without starting the HTTP server. The server reads the logs read-only, writes nothing to disk and answers only requests addressed to `127.0.0.1` or `localhost` ([ADR 0013](docs/adr/0013-server-data-api-and-dashboard.md)).
 
