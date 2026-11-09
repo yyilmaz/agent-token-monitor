@@ -1,13 +1,12 @@
-// Pins USE-1 usage totals and LIVE-1 open sessions of ADR 0013 (R-33, R-16, R-51a).
+// Pins USE-1 usage totals and LIVE-1 open sessions of ADR 0013 (R-33, R-16, R-51).
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { analyzeCache, type CacheConfig } from "../../../src/core/analysis/cache.js";
 import { openSessions, sessionTree } from "../../../src/core/analysis/live.js";
-import { dayIn, priceCalls, usageTotals } from "../../../src/core/analysis/usage.js";
+import { dayIn, usageCalls, usageTotals } from "../../../src/core/analysis/usage.js";
 import type { Call, Session } from "../../../src/core/model/index.js";
-import { priceTable } from "../../../src/core/pricing/price.js";
 
 const CACHE: CacheConfig = {
   fullMissMinContextTokens: 20000,
@@ -18,17 +17,6 @@ const CACHE: CacheConfig = {
   declaredLifetimeSeconds: { claudeCode: {}, antigravity: {}, codex: {}, opencode: {} },
   referenceLifetimeSeconds: { claudeCode: 300, antigravity: 600, codex: 300, opencode: 300 },
 };
-
-const TABLE = priceTable({
-  currency: "USD",
-  displayDecimals: 2,
-  models: {
-    m: {
-      effectiveDate: "2026-10-01",
-      tiers: [{ minContextTokens: 0, inputPerMillionTokens: 1, outputPerMillionTokens: 2, cacheReadPerMillionTokens: 0.1, cacheWritePerMillionTokensByTtlSeconds: { "300": 1.25 } }],
-    },
-  },
-});
 
 let line = 0;
 function call(id: string, sessionId: string, iso: string, spec: Partial<Call> = {}): Call {
@@ -71,32 +59,45 @@ describe("USE-1 usage totals", () => {
     call("c3", "s1", "2026-10-01T22:40:00.000Z", { kind: "compaction", inputUncached: null, cacheRead: null, cacheWrite: null, output: null }),
     call("g1", "s2", "2026-10-31T23:59:59.000Z", { model: null }),
   ];
-  const priced = priceCalls(calls, sessions, { models: { assumed: {} } }, TABLE);
+  const usage = usageCalls(calls, sessions, { models: { assumed: {} } });
 
   it("assigns days in the configured time zone", () => {
     assert.equal(dayIn(Date.parse("2026-10-01T22:30:00.000Z"), "UTC"), "2026-10-01");
     assert.equal(dayIn(Date.parse("2026-10-01T22:30:00.000Z"), "Europe/Istanbul"), "2026-10-02");
     assert.deepEqual(
-      usageTotals(priced, "day", "Europe/Istanbul", TABLE).map((p) => [p.period, p.total.calls]),
+      usageTotals(usage, "day", "Europe/Istanbul").map((p) => [p.period, p.total.calls]),
       [["2026-10-01", 1], ["2026-10-02", 2], ["2026-11-01", 1]],
     );
     assert.deepEqual(
-      usageTotals(priced, "month", "UTC", TABLE).map((p) => [p.period, p.total.calls]),
+      usageTotals(usage, "month", "UTC").map((p) => [p.period, p.total.calls]),
       [["2026-10", 4]],
     );
   });
 
   it("sums each token field and counts the calls where it is unknown (R-16)", () => {
-    const [month] = usageTotals(priced, "month", "UTC", TABLE);
+    const [month] = usageTotals(usage, "month", "UTC");
     assert.deepEqual(month?.total.inputUncached, { total: 300, unknownCalls: 1 });
     assert.deepEqual(month?.total.reasoning, { total: 4, unknownCalls: 3 });
-    assert.equal(month?.total.cost.pricedCalls, 2);
-    assert.deepEqual(month?.total.cost.unknownCalls, { unpricedModel: 1, unknownTokens: 1, unknownWritePrice: 0 });
-    assert.equal(month?.total.cost.known.total, "0.000240000000");
+  });
+
+  it("sums per-call rounded load with configured weights and counts unknown calls (ADR 0013, ADR 0017, R-16, R-51)", () => {
+    const day = "2026-10-01T20:00:00.000Z";
+    const partial = { inputUncached: null, cacheWrite: null, output: null };
+    const weightedCalls = usageCalls([
+      call("w1", "s1", day, { ...partial, cacheRead: 1 }),
+      call("w2", "s2", day, { ...partial, cacheRead: 1 }),
+      call("w3", "s1", day, { ...partial, cacheRead: null }),
+    ], sessions, { models: { assumed: {} } });
+    const [period] = usageTotals(weightedCalls, "day", "UTC", { cacheRead: 0.5, inputUncached: 1, cacheWrite: 1.25, output: 5 });
+    assert.deepEqual(period?.weightedTokenUnits, { total: 2, unknownCalls: 1 });
+    assert.deepEqual(period?.byHarness.map((s) => [s.harness, s.weightedTokenUnits]), [
+      ["antigravity", { total: 1, unknownCalls: 0 }],
+      ["claudeCode", { total: 1, unknownCalls: 1 }],
+    ]);
   });
 
   it("splits by harness, effective model and project, with unknown kept apart", () => {
-    const [month] = usageTotals(priced, "month", "UTC", TABLE);
+    const [month] = usageTotals(usage, "month", "UTC");
     assert.deepEqual(month?.byHarness.map((s) => [s.harness, s.figures.calls]), [["antigravity", 1], ["claudeCode", 3]]);
     assert.deepEqual(month?.byModel.map((s) => [s.harness, s.model, s.figures.calls]), [["antigravity", null, 1], ["claudeCode", "m", 3]]);
     assert.deepEqual(month?.byProject.map((s) => [s.project, s.figures.calls]), [["/work/a", 3], [null, 1]]);
@@ -104,7 +105,7 @@ describe("USE-1 usage totals", () => {
   });
 
   it("totals per session", () => {
-    assert.deepEqual(usageTotals(priced, "session", "UTC", TABLE).map((p) => [p.period, p.total.calls]), [["s1", 3], ["s2", 1]]);
+    assert.deepEqual(usageTotals(usage, "session", "UTC").map((p) => [p.period, p.total.calls]), [["s1", 3], ["s2", 1]]);
   });
 });
 

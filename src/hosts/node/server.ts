@@ -16,7 +16,7 @@ export interface ServerOptions {
   readonly staticDir: string;
   /** dist/web/src: compiled frontend modules. */
   readonly scriptDir: string;
-  /** web/vendor: pinned third-party files (uPlot, ADR 0005). */
+  /** web/vendor: pinned uPlot and Bootstrap assets (ADR 0005, ADR 0019). */
   readonly vendorDir: string;
   /** Host clock in epoch milliseconds; the only clock read of the product (ADR 0006). */
   readonly now: () => number;

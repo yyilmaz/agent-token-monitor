@@ -1,9 +1,6 @@
-// Display formatting only. Values arrive exact from the API; rounding happens here, half to even (ADR 0011).
+// Display formatting only.
 
 import type { DeclaredGroup, MissCauseKind } from "../../src/core/analysis/cache.js";
-import type { CostTotal, Money } from "../../src/core/pricing/price.js";
-
-const MONEY_DECIMALS = 12;
 
 /** Groups digits with thin spaces; independent of the browser locale. */
 export function tokens(value: number | null): string {
@@ -36,54 +33,6 @@ export const CAUSE: Readonly<Record<MissCauseKind, readonly [string, string]>> =
   idleBeyondLifetime: ["Pause too long", "The pause was longer than the cache usually lasts."],
   prematureLoss: ["Lost too early", "The cache was gone before its usual lifetime ran out."],
 };
-
-/**
- * The penalty ratio (SIM-2) in words: full-price input paid ÷ what the declared lifetime would have cost.
- * Compared with 1 exactly, the value at which reality matches the promise; no threshold is involved.
- */
-export function penalty(numerator: number, denominator: number, defined: boolean): { text: string; tone: "" | "good" | "bad"; exact: string } {
-  const exact = ratio(numerator, denominator, defined);
-  if (!defined) return { text: "not defined", tone: "", exact };
-  if (numerator === denominator) return { text: "as promised", tone: "good", exact };
-  const share = `${((Math.abs(numerator - denominator) / denominator) * 100).toFixed(1)}%`;
-  return numerator > denominator ? { text: `paid ${share} more than promised`, tone: "bad", exact } : { text: `paid ${share} less than promised`, tone: "good", exact };
-}
-
-function roundUnits(numerator: bigint, denominator: bigint): bigint {
-  let kept = numerator / denominator;
-  const remainder = numerator % denominator;
-  if (remainder * 2n > denominator || (remainder * 2n === denominator && kept % 2n === 1n)) kept += 1n;
-  return kept;
-}
-
-function decimal(units: bigint, decimals: number): string {
-  if (decimals === 0) return tokens(Number(units));
-  const digits = units.toString().padStart(decimals + 1, "0");
-  return `${tokens(Number(digits.slice(0, -decimals)))}.${digits.slice(-decimals)}`;
-}
-
-export function money(value: Money, decimals: number, currency: string): string {
-  const units = BigInt(value.replace(".", ""));
-  return `${decimal(roundUnits(units, 10n ** BigInt(MONEY_DECIMALS - decimals)), decimals)} ${currency}`;
-}
-
-/** `value / tokens × perTokens`, e.g. a price per million context tokens (ADR 0012 CMP-2). */
-export function moneyPer(value: Money, count: number, perTokens: number, decimals: number, currency: string): string {
-  const numerator = BigInt(value.replace(".", "")) * BigInt(perTokens) * 10n ** BigInt(decimals);
-  return `${decimal(roundUnits(numerator, BigInt(count) * 10n ** BigInt(MONEY_DECIMALS)), decimals)} ${currency}`;
-}
-
-/** A cost total: unknown when nothing is priced, "incomplete" when some calls have no price (R-16). */
-export function cost(total: CostTotal | null, decimals: number, part: "total" | "input" = "total"): string {
-  if (total === null || total.pricedCalls === 0) return "unknown (no price set)";
-  const unknown = Object.values(total.unknownCalls).reduce((a, b) => a + b, 0);
-  const text = money(total.known[part], decimals, total.currency);
-  return unknown > 0 ? `${text} (incomplete: ${unknown} calls without a price)` : text;
-}
-
-export function ratio(numerator: number, denominator: number, defined: boolean): string {
-  return defined ? (numerator / denominator).toFixed(3) : "not defined";
-}
 
 export function duration(seconds: number | null): string {
   if (seconds === null) return "unknown";

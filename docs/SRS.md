@@ -90,12 +90,12 @@ Requirements change only by explicit owner decision. This document always states
 - **R-32** The dashboard MUST update itself continuously while open, without manual reload.
 - **R-33** The dashboard MUST provide these views:
   1. **Open sessions now:** each active session with its harness, context size, time since the last call, live cache status and session advice.
-  2. **Usage by day, month and session**, broken down by harness, model and project.
+  2. **Usage over a selected date range**, with total token usage, breakdowns by harness, model, and project, and separate charts for input tokens, output tokens, and weighted token units.
   3. **Cache behavior** (section 3.4).
 
 ### 3.4 Cache observation
 
-- **R-40** For every call, the product MUST record whether the cache hit fully, partially or missed fully, and how many tokens were re-read at full price as a result.
+- **R-40** For every call, the product MUST record whether the cache hit fully, partially or missed fully, and how many tokens were re-read without a cache hit as a result.
 - **R-41** For each harness, model and session, the product MUST show the idle gaps after which the cache survived and the gaps after which it was gone.
 - **R-42** The product MUST report the observed cache lifetime in seconds, at minimum:
   - the longest idle gap after which the cache still hit,
@@ -106,10 +106,9 @@ Requirements change only by explicit owner decision. This document always states
 - **R-43** Every full miss MUST be assigned exactly one cause from a fixed, ordered rule set covering at minimum: model switch, compaction, idle beyond the observed lifetime, and premature loss.
 - **R-44** Where a harness declares or implies a cache lifetime (e.g. Claude Code logs 5-minute and 1-hour cache writes), the product MUST compare it with the observed lifetime.
 
-### 3.5 Currency
+### 3.5 Usage units
 
-- **R-51a Tokens and currency together.** From Phase 1 onward, usage figures and session advice MUST be shown in both token units and currency, side by side. Prices MUST come from a local, user-editable price table (never fetched from the network, R-14). The product MAY ship a default price table; every price table MUST state its effective date, and the dashboard MUST show it. A model with no configured price MUST show its currency value as `unknown` (R-16).
-- **R-51b Currency is list-price equivalent.** Currency values MUST be labeled as API list-price equivalents, not as the user's actual bill. Subscription and quota plans (e.g. Antigravity) do not bill per token, so the label MUST make this clear.
+- **R-51** Usage and session advice MUST report token counts or explicitly labeled weighted token units. The product MUST NOT calculate or display monetary values or ship a price table.
 
 ### 3.6 Session advice
 

@@ -4,17 +4,50 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Agent Token Monitor</title>
+    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css" />
     <link rel="stylesheet" href="vendor/uplot/uPlot.min.css" />
     <link rel="stylesheet" href="style.css" />
     <script src="vendor/uplot/uPlot.iife.min.js"></script>
+    <script type="module" src="vendor/bootstrap/js/drawer.js"></script>
     <script type="module" src="js/main.js"></script>
   </head>
   <body>
-    <header class="top">
-      <h1>Agent Token Monitor</h1>
-      <nav id="tabs" aria-label="Views"></nav>
-      <p id="status" class="muted" aria-live="polite"></p>
+    <header>
+      <nav class="navbar md:navbar-expand dashboard-navbar" aria-label="Views">
+        <div class="container-fluid">
+          <h1 class="navbar-brand">Agent Token Monitor</h1>
+          <dialog id="nav-drawer" class="drawer drawer-end" aria-label="Views">
+            <div class="drawer-header justify-content-end">
+              <button class="btn-icon nav-close" type="button" data-bs-dismiss="drawer" aria-label="Close navigation">
+                <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="m5 5 10 10M15 5 5 15" />
+                </svg>
+              </button>
+            </div>
+            <div class="drawer-body">
+              <ul id="tabs" class="nav navbar-nav"></ul>
+            </div>
+          </dialog>
+          <p id="status" class="muted small mb-0 ms-auto text-end" aria-live="polite"></p>
+          <div class="d-flex align-items-center">
+            <button id="nav-toggle" class="btn-icon navbar-toggler" type="button" data-bs-toggle="drawer" data-bs-target="#nav-drawer" aria-controls="nav-drawer" aria-expanded="false" aria-label="Toggle navigation">
+              <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M3 5h14M3 10h14M3 15h14" />
+              </svg>
+            </button>
+            <button id="theme-toggle" class="btn-icon" type="button" aria-label="Dark theme" aria-pressed="false">
+              <svg class="theme-moon" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M17 12a7 7 0 0 1-9-9 7.5 7.5 0 1 0 9 9Z" />
+              </svg>
+              <svg class="theme-sun" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="10" cy="10" r="3.5" />
+                <path d="M10 1v3m0 12v3M1 10h3m12 0h3M3.6 3.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1m-8.6 8.6-2.1 2.1" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </nav>
     </header>
-    <main id="view"></main>
+    <main id="view" class="container-fluid"></main>
   </body>
 </html>

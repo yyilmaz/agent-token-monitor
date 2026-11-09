@@ -43,7 +43,7 @@ export interface CallCacheResult {
   readonly class: CacheClass;
   /** LOSS-1: the session's own cache was gone (a full miss, or a partial hit with a small read share). */
   readonly cacheLoss: boolean;
-  /** Tokens of the previous context paid at full price again; null when it cannot be computed. */
+  /** Tokens of the previous context re-read without a cache hit; null when it cannot be computed. */
   readonly reReadTokens: number | null;
   readonly previousCallId: string | null;
   /** Derived (PAIR-1): time between the recorded timestamps of the two calls. */

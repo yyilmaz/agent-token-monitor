@@ -10,7 +10,7 @@ ADR 0002 defines a frontend that only renders data from the backend. The UI must
 
 ## Decision
 
-1. **One HTML page with plain TypeScript, compiled by `tsc` (ADR 0004). No UI framework, no bundler.**
+1. **One HTML page with plain TypeScript, compiled by `tsc` (ADR 0004).** Bootstrap provides dashboard components, layout, and color modes (ADR 0019). The frontend loads vendored files directly without a bundler.
 2. **Charts: uPlot** (MIT), vendored into the repository as a pinned file with its license. Nothing loads from a CDN (R-14).
 3. **Live updates by polling:** the page asks the backend for fresh data every few seconds. The interval lives in configuration (R-72).
 4. **Rules for future VS Code Webview reuse** (R-25):

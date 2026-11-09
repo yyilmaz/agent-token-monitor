@@ -1,5 +1,4 @@
-// Pins the session advice of ADR 0017: FRESH-1, POSTCOMPACT-1, SUMMARY-1, REMAIN-1 and ADVICE-1 (R-60, R-62), on the
-// ADR's worked example: Opus-like prices, a fresh start of 80,600, 92,000 after compacting, a 20,000-token summary.
+// Pins FRESH-1, POSTCOMPACT-1, SUMMARY-1, REMAIN-1 and weighted ADVICE-1 (ADR 0017, R-51, R-60, R-62).
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -9,7 +8,6 @@ import { analyzeCache, type CacheConfig } from "../../../src/core/analysis/cache
 import { openSessions } from "../../../src/core/analysis/live.js";
 import type { Config } from "../../../src/core/config/config.js";
 import type { Call, Event, Session } from "../../../src/core/model/index.js";
-import { priceTable } from "../../../src/core/pricing/price.js";
 
 const CACHE: CacheConfig = {
   fullMissMinContextTokens: 20000,
@@ -17,7 +15,6 @@ const CACHE: CacheConfig = {
   survivedMinCacheReadShare: 0.75,
   lifetimeBandEdgesSeconds: [60],
   minLifetimeObservations: 4,
-  // DECL-1 step 2: every call of model m declares a one-hour cache, so writes are priced at 8.
   declaredLifetimeSeconds: { claudeCode: { m: 3600 }, antigravity: {}, codex: {}, opencode: {} },
   referenceLifetimeSeconds: { claudeCode: 300, antigravity: 300, codex: 300, opencode: 300 },
 };
@@ -25,18 +22,6 @@ const CACHE: CacheConfig = {
 const RULES: Config["rules"] = {
   freshSession: { minSessions: 5 },
   sessionAdvice: { minCompactions: 5, minSessions: 5, contextBandEdgesTokens: [50000, 100000, 200000, 500000] },
-};
-
-/** Claude Opus 5.5's list prices (ADR 0011, 2026-11-01). */
-const PRICING: Config["pricing"] = {
-  currency: "USD",
-  displayDecimals: 2,
-  models: {
-    m: {
-      effectiveDate: "2026-11-01",
-      tiers: [{ minContextTokens: 0, inputPerMillionTokens: 4, outputPerMillionTokens: 20, cacheReadPerMillionTokens: 0.2, cacheWritePerMillionTokensByTtlSeconds: { "300": 5, "3600": 8 } }],
-    },
-  },
 };
 
 const T = Date.parse("2026-10-31T12:00:00.000Z");
@@ -116,6 +101,7 @@ function advise(
   idleSeconds: number,
   options: {
     past?: number;
+    weights?: Config["rules"]["sessionAdvice"]["weights"];
     model?: string;
     context?: number;
     toolNames?: readonly string[];
@@ -135,16 +121,13 @@ function advise(
     cache: CACHE,
     models: { assumed: {} },
     liveView: { openWithinSeconds: 86400 },
-    rules: RULES,
-    pricing: PRICING,
+    rules: options.weights === undefined ? RULES : { ...RULES, sessionAdvice: { ...RULES.sessionAdvice, weights: options.weights } },
   };
-  const table = priceTable(config.pricing);
   const cache = analyzeCache(data, config);
   const open = openSessions(data, cache, config, T);
-  return sessionAdvice(data, cache, open, config satisfies AdviceConfig, table, T);
+  return sessionAdvice(data, cache, open, config satisfies AdviceConfig, T);
 }
 
-const money = (value: string | null | undefined) => (value == null ? null : Number(value).toFixed(6));
 
 describe("history figures (ADR 0017)", () => {
   const result = advise(60);
@@ -172,39 +155,59 @@ describe("history figures (ADR 0017)", () => {
 });
 
 describe("ADVICE-1", () => {
-  it("warm at 160,000: keep going; compacting pays off after 44 messages, a new session after 41", () => {
+  it("keeps going with a warm cache and reports weighted totals and break-even horizons", () => {
     const [a] = advise(60).advice;
-    assert.deepEqual([a?.sessionId, a?.warm, a?.writeLifetimeSeconds, a?.horizonMessages, a?.advice], ["live", true, 3600, 11, "keepGoing"]);
+    assert.deepEqual([a?.sessionId, a?.warm, a?.horizonMessages, a?.advice], ["live", true, 11, "keepGoing"]);
     assert.deepEqual(
-      a?.options.map((o) => [o.option, money(o.oneTime), money(o.perMessage), money(o.total), o.breakEvenMessages]),
+      a?.options.map((o) => [o.option, o.oneTime, o.perMessage, o.total, o.breakEvenMessages]),
       [
-        ["keepGoing", "0.000000", "0.032000", "0.352000", 0],
-        // 160,000 × 0.2 + 20,000 × 20 + 20,000 × 8 (only the summary is written; the rest stays cached).
-        ["compact", "0.592000", "0.018400", "0.794400", 44],
-        ["startFresh", "0.644800", "0.016120", "0.822120", 41],
+        ["keepGoing", 0, 16000, 176000, 0],
+        ["compact", 141000, 9200, 242200, 21],
+        ["startFresh", 100750, 8060, 189410, 13],
       ],
     );
-    assert.equal(money(a?.saving), "0.000000");
+    assert.equal(a?.saving, 0);
   });
 
-  it("cold at 160,000: start fresh, and compacting is the most expensive option", () => {
+  it("starts fresh with a cold cache and counts the rebuild in the initial load", () => {
     const [a] = advise(4000).advice;
     assert.deepEqual([a?.warm, a?.advice], [false, "startFresh"]);
     assert.deepEqual(
-      a?.options.map((o) => [o.option, money(o.oneTime)]),
+      a?.options.map((o) => [o.option, o.oneTime, o.breakEvenMessages]),
       [
-        ["keepGoing", "1.280000"],
-        // 160,000 written again, the summary output, then 92,000 written after compacting.
-        ["compact", "2.416000"],
-        ["startFresh", "0.644800"],
+        ["keepGoing", 200000, 0],
+        ["compact", 415000, 32],
+        ["startFresh", 100750, 0],
       ],
     );
-    assert.equal(money(a?.saving), "0.809880");
+    assert.equal(a?.saving, 186590);
   });
 
-  it("is unknown for a model without a price, while WORKFLOW-1 still computes", () => {
-    const [a] = advise(60, { model: "unpriced" }).advice;
-    assert.deepEqual([a?.advice, a?.unknownReason, a?.options], [null, "unpricedModel", []]);
+  it("recommends compaction when the smaller context outweighs the summary load", () => {
+    const weights = { cacheRead: 0.1, cacheWrite: 1, inputUncached: 1, output: 0 };
+    const [a] = advise(60, { weights }).advice;
+    assert.equal(a?.advice, "compact");
+    assert.equal(a?.saving, 38800);
+  });
+
+  it("uses configured weights and keeps going when all options tie", () => {
+    const weights = { cacheRead: 0, cacheWrite: 0, inputUncached: 1, output: 0 };
+    const [a] = advise(60, { weights }).advice;
+    assert.deepEqual(a?.weights, weights);
+    assert.equal(a?.advice, "keepGoing");
+    assert.deepEqual(a?.options.map((o) => [o.total, o.breakEvenMessages]), [[0, 0], [0, 0], [0, 0]]);
+  });
+
+  it("reports no break-even when a positive initial load cannot be recovered", () => {
+    const weights = { cacheRead: 0, cacheWrite: 1, inputUncached: 1, output: 0 };
+    const [a] = advise(60, { weights }).advice;
+    assert.equal(a?.advice, "keepGoing");
+    assert.deepEqual(a?.options.map((o) => o.breakEvenMessages), [0, null, null]);
+  });
+
+  it("reports missing model history while WORKFLOW-1 still computes", () => {
+    const [a] = advise(60, { model: "new-model" }).advice;
+    assert.deepEqual([a?.advice, a?.unknownReason, a?.options], [null, "freshStartUnknown", []]);
     assert.deepEqual(
       [
         a?.workflow.rule,

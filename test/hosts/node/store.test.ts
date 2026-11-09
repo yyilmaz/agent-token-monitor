@@ -75,11 +75,10 @@ describe("harness sources (R-20, R-21, R-23)", () => {
   const root = mkdtempSync(join(tmpdir(), "atm-sources-"));
   after(() => rmSync(root, { recursive: true, force: true }));
   cpSync(FIXTURES, join(root, "logs"), { recursive: true });
-  // Stand-ins for harnesses without an adapter: only their file names matter, the contents are never read.
-  mkdirSync(join(root, "codex", "2026", "10", "31"), { recursive: true });
-  writeFileSync(join(root, "codex", "2026", "10", "31", "rollout-a.jsonl"), "not read\n");
+  cpSync(join(FIXTURES, "codex"), join(root, "codex"), { recursive: true });
   writeFileSync(join(root, "codex", "notes.txt"), "not a session\n");
   mkdirSync(join(root, "opencode"), { recursive: true });
+  writeFileSync(join(root, "opencode", "opencode.db"), "not read");
   const config = join(root, "config.json");
   writeFileSync(
     config,
@@ -101,9 +100,9 @@ describe("harness sources (R-20, R-21, R-23)", () => {
     assert.deepEqual(sources, [
       ["claudeCode", true, "found"],
       ["antigravity", true, "none"],
-      ["codex", false, "found"],
-      ["opencode", false, "none"],
+      ["codex", true, "found"],
+      ["opencode", false, "found"],
     ]);
-    assert.equal(state.analysis.sources.find((s) => s.harness === "codex")?.files, 1);
+    assert.equal(state.analysis.sources.find((s) => s.harness === "codex")?.files, 2);
   });
 });

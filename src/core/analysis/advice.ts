@@ -1,15 +1,15 @@
 // Session advice of ADR 0017: keep going, compact or start fresh (R-60, R-62).
 // FRESH-1, POSTCOMPACT-1, SUMMARY-1 and REMAIN-1 come from the user's own history; ADVICE-1 compares the three totals in
-// exact currency (ADR 0011). Pure functions over the normalized model; no thresholds besides minimum counts.
+// weighted token units (R-51). Pure functions over the normalized model; no thresholds besides minimum counts.
 
 import type { Config } from "../config/config.js";
 import type { Call, EpochMillis, Event, HarnessId, Session } from "../model/index.js";
 import { compareStrings } from "../order.js";
-import { breakEvenMessages, compareMoney, LIST_PRICE_LABEL, type Money, moneyDifference, moneyTimes, type PriceTable, priceStep, sumMoney } from "../pricing/price.js";
+import { TOKEN_WEIGHT_SCALE } from "../config/schema.js";
 import type { CacheAnalysis, CallCacheResult, ModelSource } from "./cache.js";
 import type { CacheStatus, OpenSession } from "./live.js";
 
-export type AdviceConfig = Pick<Config, "rules" | "pricing">;
+export type AdviceConfig = Pick<Config, "rules">;
 
 interface Group {
   readonly harness: HarnessId;
@@ -199,22 +199,20 @@ export interface WorkflowProfile {
   readonly subagentWeightedTokens: number;
 }
 
-export interface OptionCost {
+export interface OptionLoad {
   readonly option: AdviceOption;
-  /** Paid once, before or with the next message. */
-  readonly oneTime: Money;
-  readonly perMessage: Money;
+  /** Processed once, before or with the next message. */
+  readonly oneTime: number;
+  readonly perMessage: number;
   /** oneTime + horizon × perMessage. */
-  readonly total: Money;
-  /** Messages after which it beats keeping going; null means never. Always 0 for keepGoing. */
+  readonly total: number;
+  /** First whole-message horizon at which it matches or beats keeping going; null means never. Always 0 for keepGoing. */
   readonly breakEvenMessages: number | null;
 }
 
 export type AdviceUnknownReason =
   | "modelUnknown"
   | "contextUnknown"
-  | "unpricedModel"
-  | "writePriceUnknown"
   | "freshStartUnknown"
   | "postCompactionUnknown"
   | "summaryUnknown"
@@ -230,15 +228,13 @@ export interface SessionAdvice {
   readonly cacheStatus: CacheStatus;
   /** "warm" in LIVE-1 terms; "probablyCold" and "missedOnLastCall" count as cold. */
   readonly warm: boolean;
-  /** The lifetime writes are priced at: LIVE-1's reference lifetime (declared, else observed, else configured). */
-  readonly writeLifetimeSeconds: number;
-  /** null when a figure or price is missing; `unknownReason` then says which (R-16). */
+  /** null when a figure is missing; `unknownReason` then says which (R-16). */
   readonly advice: AdviceOption | null;
   readonly unknownReason: AdviceUnknownReason | null;
   /** Lowest total; the three options in the order keepGoing, compact, startFresh. Empty when unknown. */
-  readonly options: readonly OptionCost[];
-  /** Total of keeping going minus total of the advice; "0…" when the advice is to keep going. */
-  readonly saving: Money | null;
+  readonly options: readonly OptionLoad[];
+  /** Total of keeping going minus total of the advice; zero when the advice is to keep going. */
+  readonly saving: number | null;
   readonly horizonMessages: number | null;
   readonly figures: {
     readonly freshStart: FreshStart | null;
@@ -246,8 +242,7 @@ export interface SessionAdvice {
     readonly summary: SummarySize | null;
     readonly remaining: RemainingMessages | null;
   };
-  readonly currency: string;
-  readonly label: typeof LIST_PRICE_LABEL;
+  readonly weights: TokenWeights;
   readonly workflow: WorkflowProfile;
   readonly callIds: readonly string[];
 }
@@ -271,7 +266,6 @@ export function sessionAdvice(
   cache: CacheAnalysis,
   open: readonly OpenSession[],
   settings: AdviceConfig,
-  table: PriceTable,
   asOf: EpochMillis,
 ): AdviceResult {
   const topLevel = new Set(input.sessions.filter((s) => !s.isSubagent).map((s) => s.id));
@@ -331,7 +325,7 @@ export function sessionAdvice(
   }
 
   const advice = [...openTopLevel, ...waitingTopLevel].map((s) =>
-    adviseOne(s, input, open, bySession.get(s.sessionId) ?? [], callById, { freshStarts, postCompactions, summaries, remaining }, settings, table, asOf),
+    adviseOne(s, input, open, bySession.get(s.sessionId) ?? [], callById, { freshStarts, postCompactions, summaries, remaining }, settings),
   );
   return { freshStarts, postCompactions, summaries, remaining, advice };
 }
@@ -579,11 +573,8 @@ function adviseOne(
   callById: ReadonlyMap<string, Call>,
   figures: Figures,
   settings: AdviceConfig,
-  table: PriceTable,
-  asOf: EpochMillis,
 ): SessionAdvice {
   const warm = s.cacheStatus === "warm";
-  const L = s.referenceLifetimeSeconds;
   const same = <T extends { harness: HarnessId; model: string; modelSource: ModelSource }>(list: readonly T[]) => list.find((g) => g.harness === s.harness && g.model === s.model && g.modelSource === s.modelSource) ?? null;
   const freshStart = same(figures.freshStarts);
   const postCompaction = same(figures.postCompactions);
@@ -595,6 +586,7 @@ function adviseOne(
       : (figures.remaining.find((r) => r.harness === s.harness && r.model === s.model && r.modelSource === s.modelSource && r.fromTokens <= C && (r.toTokens === null || C < r.toTokens)) ?? null);
   const workflow = workflowProfile(s, input, open, sessionTurns, callById, freshStart, settings);
 
+  const weights = tokenWeightsOf(settings);
   const base = {
     rule: "ADVICE-1" as const,
     harness: s.harness,
@@ -604,10 +596,8 @@ function adviseOne(
     contextTokens: C,
     cacheStatus: s.cacheStatus,
     warm,
-    writeLifetimeSeconds: L,
     figures: { freshStart, postCompaction, summary, remaining },
-    currency: settings.pricing.currency,
-    label: LIST_PRICE_LABEL as typeof LIST_PRICE_LABEL,
+    weights,
     workflow,
     callIds: [s.lastCallId],
   };
@@ -615,7 +605,6 @@ function adviseOne(
 
   if (s.model === null) return unknown("modelUnknown");
   if (C === null) return unknown("contextUnknown");
-  if (!table.models.has(s.model)) return unknown("unpricedModel");
   const F = freshStart?.medianContextTokens ?? null;
   const P = postCompaction?.medianContextTokens ?? null;
   const S = summary?.medianTokens ?? null;
@@ -625,37 +614,46 @@ function adviseOne(
   if (S === null) return unknown("summaryUnknown");
   if (H === null) return unknown("remainingUnknown");
 
-  // Each part at the tier of the context it is paid in (ADR 0011): C before compacting, P after, F when fresh; all
-  // at the prices in force at the "as of" time, when the choice is made.
-  const at = (ctx: number, tokens: { cacheRead?: number; cacheWrite?: number; output?: number }) => priceStep(s.model as string, ctx, L, tokens, table, asOf);
-  const parts = {
-    keepOne: warm ? at(C, {}) : at(C, { cacheWrite: C }),
-    keepPer: at(C, { cacheRead: C }),
-    compactRead: warm ? at(C, { cacheRead: C, output: S }) : at(C, { cacheWrite: C, output: S }),
-    compactWrite: warm ? at(P, { cacheWrite: S }) : at(P, { cacheWrite: P }),
-    compactPer: at(P, { cacheRead: P }),
-    freshOne: at(F, { cacheWrite: F }),
-    freshPer: at(F, { cacheRead: F }),
-  };
-  if (Object.values(parts).some((m) => m === null)) return unknown("writePriceUnknown");
-  const m = parts as Record<keyof typeof parts, Money>;
+  // Compare exact millionths so fractional weights cannot change ties or break-even horizons (ADR 0017).
+  const units = (weight: number) => BigInt(Math.round(weight * TOKEN_WEIGHT_SCALE));
+  const read = units(weights.cacheRead);
+  const write = units(weights.cacheWrite);
+  const output = units(weights.output);
+  const context = BigInt(C);
+  const post = BigInt(P);
+  const summarySize = BigInt(S);
+  const fresh = BigInt(F);
+  const keepInitial = warm ? 0n : context * write;
+  const keepPerMessage = context * read;
+  const load = (value: bigint) => Number(value) / TOKEN_WEIGHT_SCALE;
 
-  const option = (name: AdviceOption, oneTime: Money, perMessage: Money): OptionCost => ({
-    option: name,
-    oneTime,
-    perMessage,
-    total: sumMoney([oneTime, moneyTimes(perMessage, H)]),
-    breakEvenMessages: name === "keepGoing" ? 0 : breakEvenMessages(oneTime, perMessage, m.keepOne, m.keepPer),
-  });
-  const options = [
-    option("keepGoing", m.keepOne, m.keepPer),
-    option("compact", sumMoney([m.compactRead, m.compactWrite]), m.compactPer),
-    option("startFresh", m.freshOne, m.freshPer),
+  const option = (name: AdviceOption, initial: bigint, perMessage: bigint) => {
+    const total = initial + BigInt(H) * perMessage;
+    const initialGap = initial - keepInitial;
+    const perMessageSaving = keepPerMessage - perMessage;
+    const breakEvenMessages =
+      initialGap <= 0n ? 0 : perMessageSaving <= 0n ? null : Number((initialGap + perMessageSaving - 1n) / perMessageSaving);
+    const result: OptionLoad = {
+      option: name, oneTime: load(initial), perMessage: load(perMessage), total: load(total), breakEvenMessages,
+    };
+    return { result, total };
+  };
+  const keep = option("keepGoing", keepInitial, keepPerMessage);
+  const compactInitial = warm ? context * read + summarySize * write : (context + post) * write;
+  const alternatives = [
+    option("compact", compactInitial + summarySize * output, post * read),
+    option("startFresh", fresh * write, fresh * read),
   ];
-  // Lowest total; on a tie the earlier, less disruptive option stays (keep going, compact, start fresh).
-  const best = options.reduce((chosen, o) => (compareMoney(o.total, chosen.total) < 0 ? o : chosen));
-  const keep = options[0] as OptionCost;
-  return { ...base, advice: best.option, unknownReason: null, options, saving: moneyDifference(keep.total, best.total), horizonMessages: H };
+  // Keep the earlier, less disruptive option on a tie.
+  const best = alternatives.reduce((chosen, candidate) => (candidate.total < chosen.total ? candidate : chosen), keep);
+  return {
+    ...base,
+    advice: best.result.option,
+    unknownReason: null,
+    options: [keep, ...alternatives].map(({ result }) => result),
+    saving: load(keep.total - best.total),
+    horizonMessages: H,
+  };
 }
 
 function bandOf(tokens: number, edges: readonly number[]): number {

@@ -23,7 +23,7 @@ If no user file exists, the defaults apply. The tool never creates or rewrites i
 - **Merge:** objects merge key by key; arrays and single values replace the default as a whole.
 - **Unknown keys are errors.** A misspelled key is reported, never ignored.
 - `null` is not allowed.
-- `schemaVersion` must match the version the tool expects (currently `1`). There is no silent migration.
+- `schemaVersion` must match the version the tool expects (currently `2`). There is no silent migration. For a version 1 user file, remove the `pricing` key if present and update an explicit `schemaVersion` to `2`.
 - On any error, the tool shows the file, the key path and the reason, and shows no analysis results.
 - A leading `~` in paths means your home directory.
 - The configuration in effect is shown in the dashboard and embedded in exported reports (R-10, R-71).
@@ -41,7 +41,7 @@ Example user file that points Claude Code at a second log directory and lowers t
 
 ### `schemaVersion`
 
-Integer. Version of this schema. Default: `1`.
+Integer. Version of this schema. Default: `2`.
 
 ### `logRoots`
 
@@ -51,7 +51,7 @@ Where each harness writes its logs (R-24). Each is an array of directory paths; 
 |---|---|---|
 | `logRoots.claudeCode` | `["~/.claude/projects"]` | |
 | `logRoots.antigravity` | `["~/.gemini/antigravity/brain"]` | |
-| `logRoots.codex` | `["~/.codex/sessions"]` | Phase 2 (R-21). Until its adapter exists, `rollout-*.jsonl` files here are only listed, never read, so Usage can say Codex is found but not counted (R-23) |
+| `logRoots.codex` | `["~/.codex/sessions"]` | Reads `rollout-*.jsonl` files recursively. For a custom Codex home, point this at its `sessions` directory. Add `~/.codex/archived_sessions` to include archived rollouts ([ADR 0018](adr/0018-codex-adapter.md)). |
 | `logRoots.opencode` | `["~/.local/share/opencode"]` | Phase 2 (R-21). Until its adapter exists, only the presence of `opencode.db` is checked; the database is never opened (R-15) |
 
 ### `sessionIndexRoots`
@@ -116,64 +116,13 @@ Session advice ([ADR 0017](adr/0017-session-advice.md), R-60, R-62, R-63). Conte
 | `sessionAdvice.minSessions` | count | `5` | integer ≥ 1 | `REMAIN-1` (ADR 0017): fewer sessions in a context band make the figure, and the advice, unknown |
 | `sessionAdvice.contextBandEdgesTokens` | tokens | `[50000, 100000, 200000, 500000]` | integers ≥ 1, strictly ascending, at least one | `REMAIN-1` and `WORKFLOW-1` (ADR 0017): context-size bands |
 | `sessionAdvice.recentTurnsWindow` | count | `5` | integer ≥ 1 | `WORKFLOW-1` (ADR 0017): number of most recent turns used for the recent step load average |
-| `sessionAdvice.weights` | multiplier | `{ cacheRead: 0.1, inputUncached: 1, cacheWrite: 1.25, output: 5 }` | non-negative numbers | `WORKFLOW-1` (ADR 0017): token category weights (`1` = `1` uncached input token) for comparing step and session loads |
-
-### `pricing`
-
-The local price table for currency figures ([ADR 0011](adr/0011-pricing.md), R-51a). Values are API list-price equivalents, not your bill. The product ships the published list prices of the current Claude models and Gemini 4 Argon, copied by hand from [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) on 2026-11-01. Nothing is fetched from the network: when prices change, update `config/default.json` or override a model in your user file. A model with no price, such as Antigravity's unlogged model, shows `unknown`.
-
-| Model | Input | 5 min cache write | 1 h cache write | Cache read | Output |
-|---|---|---|---|---|---|
-| `claude-fable-5-1` | 10 | 12.50 | 20 | 0.25 | 50 |
-| `claude-opus-5-5` | 4 | 5 | 8 | 0.20 | 20 |
-| `claude-sonnet-5-5` | 2 | 2.50 | 4 | 0.10 | 10 |
-| `claude-haiku-5-5`, context up to 100,000 tokens | 0.10 | 0.125 | 0.20 | 0.01 | 0.50 |
-| `claude-haiku-5-5`, context over 100,000 tokens | 0.50 | 0.625 | 1 | 0.05 | 2.50 |
-| `gemini-4-argon`, until 2026-11-30 | 2 | none | none | 0.10 | 10 |
-| `gemini-4-argon`, from 2026-12-01 | 4 | none | none | 0.20 | 20 |
-
-USD per million tokens. The Claude models other than Haiku 5.5 have no long-context tier: their full context window is priced at the standard rate. `gemini-4-argon` comes from [Google's Gemini API pricing page](https://ai.google.dev/gemini-api/docs/pricing) (checked 2026-11-01): output includes thinking tokens, and caching is implicit only, so there is no cache-write price. Google has announced that its price doubles on 2026-12-01; the shipped entry carries that as a `changes` entry, so calls from that day on are priced at the new rate and earlier calls keep the old one.
-
-Antigravity does not log its model, so these prices apply to it only once `models.assumed.antigravity` names one (below). Antigravity also does not log thinking tokens, so its currency figures leave out thinking and are lower than the real list-price equivalent.
-
-| Key | Unit | Default | Allowed | Used by |
-|---|---|---|---|---|
-| `currency` | | `"USD"` | ISO 4217 code, three capital letters | Label only; there is no conversion |
-| `displayDecimals` | places | `2` | integer ≥ 0 | Display rounding, half to even; sums are never rounded |
-| `models.<model>.effectiveDate` | date | the shipped models: `2026-11-01` | `YYYY-MM-DD` | The day these prices were checked or took effect; shown next to every currency figure of the model. Calls before it are priced with them too, as the earliest prices known |
-| `models.<model>.tiers[]` | | the shipped models: as listed above | at least one; `minContextTokens` starts at `0` and ascends strictly | `PRICE-2`: a call pays the prices of the last tier whose `minContextTokens` is at most its context size |
-| `…tiers[].minContextTokens` | tokens | | integer ≥ 0 | |
-| `…tiers[].inputPerMillionTokens` | currency per million tokens | | ≥ 0, at most 6 decimal places | Uncached input |
-| `…tiers[].outputPerMillionTokens` | currency per million tokens | | ≥ 0, at most 6 decimal places | Output, including reasoning |
-| `…tiers[].cacheReadPerMillionTokens` | currency per million tokens | | ≥ 0, at most 6 decimal places | Cache reads |
-| `…tiers[].cacheWritePerMillionTokensByTtlSeconds.<seconds>` | currency per million tokens | | ≥ 0, at most 6 decimal places; key a whole number of seconds | Cache writes of that lifetime. A lifetime with no price uses the shortest longer listed one, else the longest; the result says so |
-| `models.<model>.changes[]` | | optional; `gemini-4-argon`: 2026-12-01 | at least one when present; each `{ "effectiveDate", "tiers" }` with the same rules as above, dates strictly later than the one before | Announced price changes. A call pays the prices in force on its UTC date: the last `effectiveDate` on or before it. Session advice uses the prices in force now |
-
-`<model>` is the effective model name: the one in the log, or `models.assumed.<harness>`. Example with a higher price above 200,000 tokens of context (the numbers are placeholders, not real prices):
-
-```json
-{
-  "pricing": {
-    "models": {
-      "example-model": {
-        "effectiveDate": "2026-10-01",
-        "tiers": [
-          { "minContextTokens": 0, "inputPerMillionTokens": 3, "outputPerMillionTokens": 15,
-            "cacheReadPerMillionTokens": 0.3, "cacheWritePerMillionTokensByTtlSeconds": { "300": 3.75, "3600": 6 } },
-          { "minContextTokens": 200001, "inputPerMillionTokens": 6, "outputPerMillionTokens": 22.5,
-            "cacheReadPerMillionTokens": 0.6, "cacheWritePerMillionTokensByTtlSeconds": { "300": 7.5, "3600": 12 } }
-        ]
-      }
-    }
-  }
-}
-```
+| `sessionAdvice.weights` | multiplier | `{ cacheRead: 0.1, inputUncached: 1, cacheWrite: 1.25, output: 5 }` | non-negative numbers | Token category weights (`1` = `1` uncached input token) for advice, step and session loads (ADR 0017), and weighted Usage totals (ADR 0013) |
 
 ### `ui`
 
 | Key | Unit | Default | Allowed | Used by |
 |---|---|---|---|---|
 | `pollIntervalSeconds` | seconds | `5` | integer ≥ 1 | How often the dashboard asks for fresh data (R-32, [ADR 0005](adr/0005-frontend-single-page-typescript.md)) |
-| `usageRangesDays` | days | `[7, 30]` | integers ≥ 1, strictly ascending, at least one | The ranges the Usage summary offers; each is compared with the same number of days before it (R-33) |
+| `usageRangesDays` | days | `[7, 30]` | integers ≥ 1, strictly ascending, at least one | The Usage summary always offers **Today** and adds these ranges. A value of `1` uses the **Today** option. Each range is compared with the same number of days before it (R-33) |
 | `subagentRowsShown` | rows | `10` | integer ≥ 1 | How many subagent rows a session's table shows before **Show more**, newest first ([ADR 0016](adr/0016-session-titles-and-tree.md)) |
 

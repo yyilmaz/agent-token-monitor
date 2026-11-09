@@ -1,22 +1,11 @@
 // Configuration schema, validation and merge (ADR 0007, R-72).
 // Every default value lives in config/default.json; this module declares shapes only.
 
-import { array, date, HARNESS_KEYS, integer, object, optional, perHarness, price, rate, record, string, type Infer } from "./schema.js";
+import { array, HARNESS_KEYS, integer, object, optional, perHarness, rate, record, string, tokenWeight, type Infer } from "./schema.js";
 import { validate, type ValidationError } from "./validate.js";
 
 /** Version of the configuration schema. Bumped when keys change incompatibly. */
-export const CONFIG_SCHEMA_VERSION = 1;
-
-const priceTiers = array(
-  object({
-    minContextTokens: integer(0),
-    inputPerMillionTokens: price(),
-    outputPerMillionTokens: price(),
-    cacheReadPerMillionTokens: price(),
-    cacheWritePerMillionTokensByTtlSeconds: record(price(), { secondsKeys: true }),
-  }),
-  { minItems: 1 },
-);
+export const CONFIG_SCHEMA_VERSION = 2;
 
 export const configSchema = object({
   schemaVersion: integer(1),
@@ -49,25 +38,13 @@ export const configSchema = object({
       recentTurnsWindow: optional(integer(1)),
       weights: optional(
         object({
-          cacheRead: price(),
-          inputUncached: price(),
-          cacheWrite: price(),
-          output: price(),
+          cacheRead: tokenWeight(),
+          inputUncached: tokenWeight(),
+          cacheWrite: tokenWeight(),
+          output: tokenWeight(),
         }),
       ),
     }),
-  }),
-  pricing: object({
-    currency: string({ pattern: /^[A-Z]{3}$/, format: "an ISO 4217 currency code such as \"USD\"" }),
-    displayDecimals: integer(0),
-    models: record(
-      object({
-        effectiveDate: date(),
-        tiers: priceTiers,
-        // ADR 0011: announced price changes, each in force from its own date on.
-        changes: optional(array(object({ effectiveDate: date(), tiers: priceTiers }), { minItems: 1 })),
-      }),
-    ),
   }),
   ui: object({
     pollIntervalSeconds: integer(1),
@@ -161,26 +138,6 @@ function crossFieldErrors(config: Config): ValidationError[] {
     } catch {
       errors.push({ path: "usage.timeZone", message: `unknown time zone ${JSON.stringify(config.usage.timeZone)}; use "system" or an IANA name such as "Europe/Istanbul"` });
     }
-  }
-  for (const model of Object.keys(config.pricing.models).sort()) {
-    const entry = config.pricing.models[model] as Config["pricing"]["models"][string];
-    const periods = [{ path: `pricing.models.${model}`, ...entry }, ...(entry.changes ?? []).map((c, i) => ({ path: `pricing.models.${model}.changes[${i}]`, ...c }))];
-    periods.forEach((period, p) => {
-      // ADR 0011: each change takes effect after the one before it, so every day has exactly one price.
-      const before = periods[p - 1];
-      if (before !== undefined && period.effectiveDate <= before.effectiveDate) {
-        errors.push({ path: `${period.path}.effectiveDate`, message: `must be later than ${before.effectiveDate}` });
-      }
-      // ADR 0011: tiers start at 0 and ascend strictly, so every context size has exactly one tier.
-      period.tiers.forEach((tier, index) => {
-        const path = `${period.path}.tiers[${index}].minContextTokens`;
-        if (index === 0 && tier.minContextTokens !== 0) errors.push({ path, message: "the first tier must start at 0" });
-        const previous = period.tiers[index - 1];
-        if (previous !== undefined && tier.minContextTokens <= previous.minContextTokens) {
-          errors.push({ path, message: "values must be strictly ascending" });
-        }
-      });
-    });
   }
   return errors;
 }

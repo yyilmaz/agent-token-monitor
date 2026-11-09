@@ -2,11 +2,11 @@
 
 - Status: Accepted
 - Date: 2026-10-31
-- Requirements: R-10, R-13, R-16, R-23, R-24, R-26, R-51a, R-63, R-71, R-72
+- Requirements: R-10, R-13, R-16, R-23, R-24, R-26, R-51, R-63, R-71, R-72
 
 ## Context
 
-R-72 requires all thresholds, multipliers and paths to live in one documented configuration file, with no magic numbers in code. R-51a requires a user-editable, dated price table. R-24 requires configurable log locations. R-10 and R-71 require the same configuration to produce the same output, so the configuration in effect must be visible and reproducible. R-63 requires every recommendation to show the parameters it used.
+R-72 requires all thresholds, multipliers and paths to live in one documented configuration file, with no magic numbers in code. R-24 requires configurable log locations. R-10 and R-71 require the same configuration to produce the same output, so the configuration in effect must be visible and reproducible. R-63 requires every recommendation to show the parameters it used.
 
 ADR 0004 forbids runtime dependencies, and R-26 requires the configuration to work the same way inside a VS Code extension.
 
@@ -51,21 +51,19 @@ The top-level sections are listed below. The keys inside each section are define
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "logRoots":   { "claudeCode": ["~/.claude/projects"], "antigravity": ["…"], "codex": ["…"], "opencode": ["…"] },
   "sessionIndexRoots": { "claudeCode": ["…"], "antigravity": [], "codex": [], "opencode": [] },
   "models":     { "assumed": { "antigravity": "…" } },
   "liveView":   { "…": "…" },
   "cache":      { "…": "…" },
   "rules":      { "…": "…" },
-  "pricing":    { "effectiveDate": "YYYY-MM-DD", "currency": "…", "models": { "…": "…" } },
   "ui":         { "pollIntervalSeconds": "…" }
 }
 ```
 
 - `models.assumed` names the model to assume, per harness, for calls whose log records no model (ADR 0009 rule `MODEL-1`). It is empty by default. Its keys must be harness IDs (`claudeCode`, `antigravity`, `codex`, `opencode`); any other key is an error.
 - `~` in paths is expanded by the host, not the core, so Windows and Linux paths need no code change (R-24).
-- The price table lives inside this file, not in a second file, so there is exactly one configuration file (R-72). How prices and multipliers are represented, including how currency arithmetic stays deterministic, is decided in the pricing ADR.
 
 ### No secrets
 
@@ -77,7 +75,6 @@ The schema has no field for keys, tokens or credentials, and the validator rejec
 - **YAML or TOML:** more readable, but both need a third-party parser, which ADR 0004 forbids.
 - **A full copy of the defaults as the user file:** literally one file, but every new key in a release would break existing user files or require a migration tool.
 - **Mirroring every key in VS Code settings:** native editing in the Settings UI, but creates a second source of truth for the same values, and the standalone host and the extension could disagree. This conflicts with R-72.
-- **Separate price-table file:** easier to replace prices as a unit, but makes two configuration files, against R-72.
 
 ## VS Code compatibility
 

@@ -22,11 +22,6 @@ export interface StringSchema {
   readonly format: string | null;
 }
 
-/** A calendar date written as YYYY-MM-DD. */
-export interface DateSchema {
-  readonly kind: "date";
-}
-
 export interface ArraySchema<I extends Schema = Schema> {
   readonly kind: "array";
   readonly items: I;
@@ -46,21 +41,19 @@ export interface OptionalSchema<S extends Schema = Schema> {
 }
 
 /**
- * An object with free-form keys (e.g. model IDs) and uniform values; `keys`, when set, lists the only keys allowed,
- * and `secondsKeys` requires every key to be a positive whole number of seconds.
+ * An object with free-form keys (e.g. model IDs) and uniform values; `keys`, when set, lists the only keys allowed.
  */
 export interface RecordSchema<V extends Schema = Schema> {
   readonly kind: "record";
   readonly values: V;
   readonly keys: readonly string[] | null;
-  readonly secondsKeys: boolean;
 }
 
-export type Schema = IntegerSchema | NumberSchema | StringSchema | DateSchema | ArraySchema | ObjectSchema | RecordSchema;
+export type Schema = IntegerSchema | NumberSchema | StringSchema | ArraySchema | ObjectSchema | RecordSchema;
 
 export type Infer<S> = S extends IntegerSchema | NumberSchema
   ? number
-  : S extends StringSchema | DateSchema
+  : S extends StringSchema
     ? string
     : S extends ArraySchema<infer I>
       ? readonly Infer<I>[]
@@ -76,16 +69,19 @@ export const integer = (min: number): IntegerSchema => ({ kind: "integer", min }
 
 export const rate = (): NumberSchema => ({ kind: "number", min: 0, max: 1, maxDecimals: null });
 
-/** A price per million tokens: at most 6 decimal places, so it converts exactly to millionths (ADR 0011 PRICE-1). */
-export const price = (): NumberSchema => ({ kind: "number", min: 0, max: Number.MAX_SAFE_INTEGER / 1e6, maxDecimals: 6 });
+const TOKEN_WEIGHT_DECIMALS = 6;
+export const TOKEN_WEIGHT_SCALE = 10 ** TOKEN_WEIGHT_DECIMALS;
+
+/** Token weights are represented exactly in millionths for ADVICE-1 (ADR 0017, R-51). */
+export const tokenWeight = (): NumberSchema => ({
+  kind: "number", min: 0, max: Number.MAX_SAFE_INTEGER / TOKEN_WEIGHT_SCALE, maxDecimals: TOKEN_WEIGHT_DECIMALS,
+});
 
 export const string = (options: { readonly pattern?: RegExp; readonly format?: string } = {}): StringSchema => ({
   kind: "string",
   pattern: options.pattern ?? null,
   format: options.format ?? null,
 });
-
-export const date = (): DateSchema => ({ kind: "date" });
 
 export const array = <I extends Schema>(
   items: I,
@@ -106,8 +102,8 @@ export const optional = <S extends Schema>(schema: S): OptionalSchema<S> => ({ k
 
 export const record = <V extends Schema>(
   values: V,
-  options: { readonly keys?: readonly string[]; readonly secondsKeys?: boolean } = {},
-): RecordSchema<V> => ({ kind: "record", values, keys: options.keys ?? null, secondsKeys: options.secondsKeys ?? false });
+  options: { readonly keys?: readonly string[] } = {},
+): RecordSchema<V> => ({ kind: "record", values, keys: options.keys ?? null });
 
 /** Harness IDs, the allowed keys of per-harness records (R-20). */
 export const HARNESS_KEYS: readonly string[] = ["claudeCode", "antigravity", "codex", "opencode"];

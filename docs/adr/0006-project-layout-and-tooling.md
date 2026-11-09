@@ -27,7 +27,6 @@ src/
     model/               normalized types (own ADR)
     adapters/<harness>/  parse native log lines into the model
     analysis/            pure functions: usage, cache, lifetime, TTL replay, rules
-    pricing/             price table and exact currency arithmetic (ADR 0011)
     api/                 data API payloads shared by every host (ADR 0013)
     config/              config schema, validation and merge (ADR 0007)
     host/                host interfaces (types only)
@@ -38,6 +37,7 @@ web/
   src/                   frontend TypeScript: one module per view, one data-access module
   static/                index.html, CSS
   vendor/uplot/          pinned uPlot build and its LICENSE
+  vendor/bootstrap/      pinned Bootstrap stylesheet, drawer modules and LICENSE
 test/
   fixtures/<harness>/    anonymized fixture logs only (R-18, R-70)
   core/                  tests of adapters and analysis, no server

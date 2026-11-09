@@ -6,7 +6,7 @@
 
 ## Context
 
-The SRS requires, for every call, a hit / partial / full-miss classification with the tokens re-read at full price (R-40). It also requires the idle gaps after which the cache survived or was gone (R-41), an observed lifetime computed with a fixed, documented interval method (R-42), one cause per full miss from an ordered rule set (R-43), and comparing declared cache lifetimes with observed ones (R-44).
+The SRS requires, for every call, a hit / partial / full-miss classification with the tokens re-read without a cache hit (R-40). It also requires the idle gaps after which the cache survived or was gone (R-41), an observed lifetime computed with a fixed, documented interval method (R-42), one cause per full miss from an ordered rule set (R-43), and comparing declared cache lifetimes with observed ones (R-44).
 
 Logs never record when a cache entry is evicted. They only show, at each call, whether the cache was still there. The method must therefore be honest about what can be inferred, and fully deterministic (R-10, R-11).
 
@@ -47,7 +47,7 @@ The first Call of a session has no pair.
 | `hit` | `reReadTokens ≤ hitToleranceTokens` |
 | `partial` | everything else |
 
-`reReadTokens = max(0, min(prefixTokens, contextSize(c)) − cacheRead)`: tokens that were in the previous context but were paid at full price again. It is reported for every classified call (R-40). When `prefixTokens` is `null`, `reReadTokens` is `null` and only `unknown`, `first`, `belowThreshold` and `fullMiss` can apply.
+`reReadTokens = max(0, min(prefixTokens, contextSize(c)) − cacheRead)`: tokens that were in the previous context but had to be re-read without a cache hit. It is reported for every classified call (R-40). When `prefixTokens` is `null`, `reReadTokens` is `null` and only `unknown`, `first`, `belowThreshold` and `fullMiss` can apply.
 
 **Rule `LOSS-1`.** A call is a **cache loss** when it is `fullMiss`, or when it is `partial` and `cacheRead < survivedMinCacheReadShare × prefixTokens`: the session's own cache was gone and only a shared beginning was read. Every result says whether a call is a cache loss, next to its class.
 
@@ -124,7 +124,7 @@ All in `cache` in `config/default.json`. Initial defaults below are starting poi
 - **Parametric fits (for example exponential or Weibull):** smoother, but assume a shape that cache eviction does not follow, and fitting needs iterative numerics that are harder to keep byte-identical.
 - **Observed lifetime as the reference for `idleBeyondLifetime` even when a lifetime is declared:** follows the literal wording of R-43, but then a provider that promises one hour and drops the cache after five minutes would have its losses blamed on the user's idle time. Using the declared lifetime first keeps those losses visible as `prematureLoss`.
 - **Counting a partial hit as a miss:** would hide that part of the cache survived. Partial hits are reported separately with their re-read tokens.
-- **Treating an unlogged model as one shared model per session, without asking the user:** gives Antigravity a lifetime with no configuration, but no model name, so pricing still cannot use it. The configured name serves both.
+- **Treating an unlogged model as one shared model per session, without asking the user:** gives Antigravity a lifetime with no configuration, but no model name, so the group cannot be attributed to a model. A configured name identifies the assumed model.
 - **Counting every partial hit as survived:** simple, but a session whose own cache expired still reads the shared beginning, so its loss counts as survival.
 - **Excluding gaps in which another session called the same model:** discards observations while retaining some long-gap partial hits, because the shared beginning stayed cached anyway.
 - **Calling every partial hit with a large re-read a full miss in `CLS-1`:** would hide that part of the cache survived, and change the meaning of `fullMiss`. `LOSS-1` keeps the class and adds the loss judgment next to it.

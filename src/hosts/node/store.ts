@@ -16,6 +16,7 @@ import {
   combineClaudeCode,
   readClaudeCodeFile,
 } from "../../core/adapters/claude-code/index.js";
+import { CODEX_FILE_PATTERN, combineCodex, readCodexFile } from "../../core/adapters/codex/index.js";
 import { type Analysis, analyze, type HarnessSource } from "../../core/api/index.js";
 import { HARNESS_KEYS } from "../../core/config/schema.js";
 import type { Config, ConfigError } from "../../core/config/config.js";
@@ -43,11 +44,10 @@ interface Adapter {
  * dashboard can say "found, not read yet" instead of staying silent about them (R-23).
  */
 const DETECT: Readonly<Partial<Record<HarnessId, RegExp>>> = {
-  codex: /(^|\/)rollout-[^/]*\.jsonl$/,
   opencode: /^opencode\.db$/,
 };
 
-/** Adapters that exist; Codex and OpenCode follow in Phase 2 (R-21). */
+/** Adapters registered with the incremental store (R-21, ADR 0014). */
 const ADAPTERS: readonly Adapter[] = [
   { harness: "antigravity", pattern: ANTIGRAVITY_FILE_PATTERN, indexPattern: ANTIGRAVITY_INDEX_FILE_PATTERN, readFile: readAntigravityFile, combine: combineAntigravity },
   {
@@ -57,6 +57,7 @@ const ADAPTERS: readonly Adapter[] = [
     readFile: readClaudeCodeFile,
     combine: combineClaudeCode,
   },
+  { harness: "codex", pattern: CODEX_FILE_PATTERN, indexPattern: null, readFile: readCodexFile, combine: combineCodex },
 ];
 
 interface CachedFile {

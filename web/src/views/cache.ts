@@ -3,7 +3,7 @@
 
 import type { GapBand, LifetimeGroup, MissCauseKind } from "../../../src/core/analysis/cache.js";
 import type { cache, CauseTotal } from "../../../src/core/api/index.js";
-import { h, table } from "../dom.js";
+import { h } from "../dom.js";
 import * as f from "../format.js";
 
 type Cache = ReturnType<typeof cache>;
@@ -18,9 +18,9 @@ export function renderCache(data: Cache): HTMLElement {
     h(
       "p",
       { class: "muted" },
-      "After a pause, the agent either still finds its cache (cheap) or must re-read the whole conversation at full price. These numbers come from the pauses in your own logs, measured apart for each lifetime the harness promised.",
+      "After a pause, the agent either still finds its cache or must re-read the conversation without it. These numbers come from the pauses in your own logs, measured apart for each lifetime the harness promised.",
     ),
-    data.lifetimes.length === 0 ? h("p", { class: "muted" }, "No pauses observed yet.") : h("div", { class: "cards" }, data.lifetimes.map(lifetimeCard)),
+    data.lifetimes.length === 0 ? h("p", { class: "muted" }, "No pauses observed yet.") : h("div", { class: "cards d-grid gap-5" }, data.lifetimes.map(lifetimeCard)),
     h("h2", {}, "Why was the cache lost?"),
     causes(data.causes),
   );
@@ -30,11 +30,11 @@ function lifetimeCard(g: LifetimeGroup): HTMLElement {
   const pauses = g.survived + g.gone;
   return h(
     "div",
-    { class: "card" },
+    { class: "card p-5" },
     h("div", { class: "label" }, `${f.harness(g.harness)} · ${f.model(g.model, g.modelSource)}`),
     h(
       "div",
-      { class: "promise", title: "DECL-1 · the lifetime the harness's logs declared for the cache before each pause" },
+      { class: "small mt-2 mb-1", title: "DECL-1 · the lifetime the harness's logs declared for the cache before each pause" },
       g.declaredLifetimeSeconds === null ? "No lifetime promised" : ["Promised ", h("strong", {}, f.duration(g.declaredLifetimeSeconds))],
     ),
     h(
@@ -51,12 +51,12 @@ function lifetimeCard(g: LifetimeGroup): HTMLElement {
     ),
     h(
       "div",
-      { class: "muted small facts" },
+      { class: "muted small mt-3 mb-4" },
       h("div", {}, `Longest pause it survived: ${f.duration(g.longestSurvivedSeconds)}`),
       g.shortestGoneSeconds === null ? null : h("div", {}, `Shortest pause it was lost after: ${f.duration(g.shortestGoneSeconds)}`),
     ),
-    h("div", { class: "label bands-title" }, "After a pause of…"),
-    h("div", { class: "bands" }, g.bands.filter((b) => b.survived + b.gone > 0).flatMap(bandRow)),
+    h("div", { class: "label mt-3 mb-2" }, "After a pause of…"),
+    h("div", { class: "bands d-grid align-items-center row-gap-1 column-gap-4 small" }, g.bands.filter((b) => b.survived + b.gone > 0).flatMap(bandRow)),
   );
 }
 
@@ -65,7 +65,7 @@ function bandRow(b: GapBand): HTMLElement[] {
   const total = b.survived + b.gone;
   return [
     h("span", {}, bandLabel(b)),
-    h("progress", { class: "kept", value: String(b.survived), max: String(total), title: `${f.tokens(b.survived)} kept, ${f.tokens(b.gone)} lost` }),
+    h("progress", { class: "progress kept", value: String(b.survived), max: String(total), title: `${f.tokens(b.survived)} kept, ${f.tokens(b.gone)} lost` }),
     h("span", { class: "muted small" }, b.gone === 0 ? `${f.tokens(b.survived)} kept` : `${f.tokens(b.survived)} kept · ${f.tokens(b.gone)} lost`),
   ];
 }
@@ -87,40 +87,19 @@ function causes(rows: readonly CauseTotal[]): HTMLElement {
 
   return h(
     "div",
-    {},
-    h(
-      "div",
-      { class: "cards" },
-      summary.map((s) => {
-        const [label, explanation] = f.CAUSE[s.cause];
-        const tone = s.cause === "prematureLoss" ? "bad" : "";
-        return h(
-          "div",
-          { class: tone === "bad" ? "card alert" : "card", title: "CAUSE-1 · exactly one cause per loss, in order: model switch, compaction, idle beyond lifetime, premature loss" },
-          h("div", { class: "label" }, label),
-          h("div", { class: "value" }, `${f.tokens(s.losses)} times`),
-          h("div", {}, reRead(s), " tokens paid again at full price"),
-          h("div", { class: "muted small" }, explanation),
-        );
-      }),
-    ),
-    h("h2", {}, "By harness and model"),
-    table(
-      [
-        { title: "Where", cell: (c: CauseTotal) => `${f.harness(c.harness)} · ${f.model(c.model, c.modelSource)}` },
-        {
-          title: "Why",
-          cell: (c) => {
-            const [label, explanation] = f.CAUSE[c.cause];
-            const tone = c.cause === "prematureLoss" ? "bad" : "";
-            return h("span", { class: `badge ${tone}`, title: explanation }, label);
-          },
-        },
-        { title: "Times", numeric: true, cell: (c) => c.losses },
-        { title: "Tokens paid again", numeric: true, cell: reRead },
-      ],
-      rows,
-    ),
+    { class: "cards d-grid gap-5" },
+    summary.map((s) => {
+      const [label, explanation] = f.CAUSE[s.cause];
+      const tone = s.cause === "prematureLoss" ? "bad" : "";
+      return h(
+        "div",
+        { class: tone === "bad" ? "card p-5 loss-card" : "card p-5", title: "CAUSE-1 · exactly one cause per loss, in order: model switch, compaction, idle beyond lifetime, premature loss" },
+        h("div", { class: "label" }, label),
+        h("div", { class: "value" }, `${f.tokens(s.losses)} times`),
+        h("div", {}, reRead(s), " tokens re-read without a cache hit"),
+        h("div", { class: "muted small" }, explanation),
+      );
+    }),
   );
 }
 

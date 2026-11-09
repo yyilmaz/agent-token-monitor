@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "logRoots": {
     "claudeCode": ["~/.claude/projects"],
     "antigravity": ["~/.gemini/antigravity/brain"],
@@ -52,108 +52,6 @@
         "inputUncached": 1,
         "cacheWrite": 1.25,
         "output": 5
-      }
-    }
-  },
-  "pricing": {
-    "currency": "USD",
-    "displayDecimals": 2,
-    "models": {
-      "claude-fable-5-1": {
-        "effectiveDate": "2026-11-01",
-        "tiers": [
-          {
-            "minContextTokens": 0,
-            "inputPerMillionTokens": 10,
-            "outputPerMillionTokens": 50,
-            "cacheReadPerMillionTokens": 0.25,
-            "cacheWritePerMillionTokensByTtlSeconds": {
-              "300": 12.5,
-              "3600": 20
-            }
-          }
-        ]
-      },
-      "claude-opus-5-5": {
-        "effectiveDate": "2026-11-01",
-        "tiers": [
-          {
-            "minContextTokens": 0,
-            "inputPerMillionTokens": 4,
-            "outputPerMillionTokens": 20,
-            "cacheReadPerMillionTokens": 0.2,
-            "cacheWritePerMillionTokensByTtlSeconds": {
-              "300": 5,
-              "3600": 8
-            }
-          }
-        ]
-      },
-      "gemini-4-argon": {
-        "effectiveDate": "2026-11-01",
-        "tiers": [
-          {
-            "minContextTokens": 0,
-            "inputPerMillionTokens": 2,
-            "outputPerMillionTokens": 10,
-            "cacheReadPerMillionTokens": 0.1,
-            "cacheWritePerMillionTokensByTtlSeconds": {}
-          }
-        ],
-        "changes": [
-          {
-            "effectiveDate": "2026-12-01",
-            "tiers": [
-              {
-                "minContextTokens": 0,
-                "inputPerMillionTokens": 4,
-                "outputPerMillionTokens": 20,
-                "cacheReadPerMillionTokens": 0.2,
-                "cacheWritePerMillionTokensByTtlSeconds": {}
-              }
-            ]
-          }
-        ]
-      },
-      "claude-sonnet-5-5": {
-        "effectiveDate": "2026-11-01",
-        "tiers": [
-          {
-            "minContextTokens": 0,
-            "inputPerMillionTokens": 2,
-            "outputPerMillionTokens": 10,
-            "cacheReadPerMillionTokens": 0.1,
-            "cacheWritePerMillionTokensByTtlSeconds": {
-              "300": 2.5,
-              "3600": 4
-            }
-          }
-        ]
-      },
-      "claude-haiku-5-5": {
-        "effectiveDate": "2026-11-01",
-        "tiers": [
-          {
-            "minContextTokens": 0,
-            "inputPerMillionTokens": 0.1,
-            "outputPerMillionTokens": 0.5,
-            "cacheReadPerMillionTokens": 0.01,
-            "cacheWritePerMillionTokensByTtlSeconds": {
-              "300": 0.125,
-              "3600": 0.2
-            }
-          },
-          {
-            "minContextTokens": 100001,
-            "inputPerMillionTokens": 0.5,
-            "outputPerMillionTokens": 2.5,
-            "cacheReadPerMillionTokens": 0.05,
-            "cacheWritePerMillionTokensByTtlSeconds": {
-              "300": 0.625,
-              "3600": 1
-            }
-          }
-        ]
       }
     }
   },

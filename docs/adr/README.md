@@ -7,8 +7,8 @@ This folder records every significant technical decision made to satisfy the [SR
 - One decision per file, named `NNNN-short-title.md` (e.g. `0002-implementation-language.md`). Numbers are sequential and never reused.
 - An ADR MUST cite the SRS requirement IDs (`R-xx`) it serves. A decision that conflicts with the SRS is invalid: the SRS must be amended first.
 - An ADR MUST state how the decision works inside the future VS Code extension (R-26), in its "VS Code compatibility" section.
-- **The folder holds only current decisions.** To change a decision, revise its ADR. A decision that no longer applies is deleted. Git history is the archive; no `Superseded`, `Deprecated` or "previously" notes are kept.
-- Status values: `Proposed`, `Accepted`.
+- **Accepted ADRs describe the current decisions.** Revise the ADR when a decision changes. Delete it when the decision no longer applies and move any still-valid decisions into the ADRs that govern them. Keep related code, documentation and index entries aligned. Git history is the archive.
+- The only statuses are `Proposed` and `Accepted`. Use `Proposed` for decisions awaiting owner approval.
 
 ## Template
 
@@ -47,8 +47,9 @@ What becomes easier, harder or constrained as a result.
 | [0007](0007-configuration-file.md) | Configuration file: strict JSON, shipped defaults plus one user override | Accepted |
 | [0008](0008-normalized-data-model.md) | Normalized data model | Accepted |
 | [0009](0009-cache-classification-lifetime-and-miss-causes.md) | Cache classification, observed lifetime and miss causes | Accepted |
-| [0011](0011-pricing.md) | Pricing: local price table and exact currency arithmetic | Accepted |
 | [0013](0013-server-data-api-and-dashboard.md) | Local server, data API and dashboard views | Accepted |
 | [0014](0014-incremental-log-reading.md) | Incremental log reading | Accepted |
 | [0016](0016-session-titles-and-tree.md) | Session titles and session tree | Accepted |
 | [0017](0017-session-advice.md) | Session advice: keep going, compact or start fresh | Accepted |
+| [0018](0018-codex-adapter.md) | Codex rollout adapter | Accepted |
+| [0019](0019-bootstrap-navbar-and-color-modes.md) | Bootstrap 6 dashboard presentation | Accepted |

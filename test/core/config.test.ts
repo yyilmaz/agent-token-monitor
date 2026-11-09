@@ -96,53 +96,18 @@ describe("validation errors", () => {
     assert.equal(errorsOf(withUser({ ui: { usageRangesDays: [] } }))[0]?.path, "ui.usageRangesDays");
   });
 
-  describe("price table (ADR 0011)", () => {
-    const tier = (minContextTokens: number, extra: Record<string, unknown> = {}) => ({
-      minContextTokens,
-      inputPerMillionTokens: 3,
-      outputPerMillionTokens: 15,
-      cacheReadPerMillionTokens: 0.3,
-      cacheWritePerMillionTokensByTtlSeconds: { "300": 3.75 },
-      ...extra,
-    });
-    const withModel = (model: Record<string, unknown>) => withUser({ pricing: { models: { m: model } } });
+  it("rejects removed pricing and identifies the current schema version (R-51, ADR 0007)", () => {
+    assert.deepEqual(errorsOf(withUser({ pricing: {} })), [
+      { file: "user.json", path: "pricing", message: "unknown key" },
+    ]);
+    assert.match(errorsOf(withUser({ schemaVersion: 1 }))[0]?.message ?? "", /expected schemaVersion 2/);
+    assert.ok(withUser({ schemaVersion: 2, usage: { timeZone: "UTC" } }).ok);
+  });
 
-    it("accepts a dated model with ascending tiers", () => {
-      const result = withModel({ effectiveDate: "2026-10-01", tiers: [tier(0), tier(200001)] });
-      assert.ok(result.ok, JSON.stringify(result));
-    });
-
-    it("rejects tiers that do not start at 0 or do not ascend", () => {
-      assert.deepEqual(errorsOf(withModel({ effectiveDate: "2026-10-01", tiers: [tier(5), tier(5)] })), [
-        { file: "user.json", path: "pricing.models.m.tiers[0].minContextTokens", message: "the first tier must start at 0" },
-        { file: "user.json", path: "pricing.models.m.tiers[1].minContextTokens", message: "values must be strictly ascending" },
-      ]);
-    });
-
-    it("accepts announced price changes in date order and checks their tiers too", () => {
-      const change = (effectiveDate: string, tiers = [tier(0)]) => ({ effectiveDate, tiers });
-      assert.ok(withModel({ effectiveDate: "2026-11-01", tiers: [tier(0)], changes: [change("2026-12-01")] }).ok);
-      assert.deepEqual(errorsOf(withModel({ effectiveDate: "2026-11-01", tiers: [tier(0)], changes: [change("2026-11-01"), change("2026-12-01", [tier(5)])] })), [
-        { file: "user.json", path: "pricing.models.m.changes[0].effectiveDate", message: "must be later than 2026-11-01" },
-        { file: "user.json", path: "pricing.models.m.changes[1].tiers[0].minContextTokens", message: "the first tier must start at 0" },
-      ]);
-      assert.equal(errorsOf(withModel({ effectiveDate: "2026-11-01", tiers: [tier(0)], changes: [] }))[0]?.path, "pricing.models.m.changes");
-    });
-
-    it("rejects a price with more than 6 decimal places", () => {
-      const [error] = errorsOf(withModel({ effectiveDate: "2026-10-01", tiers: [tier(0, { inputPerMillionTokens: 0.0000001 })] }));
-      assert.equal(error?.path, "pricing.models.m.tiers[0].inputPerMillionTokens");
-      assert.match(error?.message ?? "", /at most 6 decimal places/);
-    });
-
-    it("rejects an impossible date, a write lifetime that is not seconds, and a bad currency code", () => {
-      assert.equal(errorsOf(withModel({ effectiveDate: "2026-02-30", tiers: [tier(0)] }))[0]?.path, "pricing.models.m.effectiveDate");
-      assert.deepEqual(
-        errorsOf(withModel({ effectiveDate: "2026-10-01", tiers: [tier(0, { cacheWritePerMillionTokensByTtlSeconds: { "5m": 3.75 } })] })),
-        [{ file: "user.json", path: "pricing.models.m.tiers[0].cacheWritePerMillionTokensByTtlSeconds.5m", message: "key must be a whole number of seconds, at least 1" }],
-      );
-      assert.equal(errorsOf(withUser({ pricing: { currency: "usd" } }))[0]?.path, "pricing.currency");
-    });
+  it("rejects token weights beyond six decimal places (ADR 0017)", () => {
+    const [error] = errorsOf(withUser({ rules: { sessionAdvice: { weights: { cacheRead: 0.0000001 } } } }));
+    assert.equal(error?.path, "rules.sessionAdvice.weights.cacheRead");
+    assert.match(error?.message ?? "", /at most 6 decimal places/);
   });
 
   it("rejects null", () => {

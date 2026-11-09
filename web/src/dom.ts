@@ -32,6 +32,28 @@ export function svg<K extends keyof SVGElementTagNameMap>(
   return element;
 }
 
+/** Bootstrap 6 accordion built on native details, so expanded state survives polling (ADR 0019). */
+export function disclosure(label: string, ...content: Child[]): HTMLElement {
+  return h(
+    "div",
+    { class: "accordion accordion-sm" },
+    h(
+      "details",
+      { class: "accordion-item" },
+      h(
+        "summary",
+        { class: "accordion-header fw-semibold gap-3" },
+        label,
+        svg("svg", { class: "accordion-icon", viewBox: "0 0 16 16", "aria-hidden": "true", fill: "none", stroke: "currentColor", "stroke-width": 1.5 },
+          svg("path", { d: "m3 6 5 5 5-5" })),
+      ),
+      h("div", { class: "accordion-body" }, content),
+    ),
+  );
+}
+
+let nextColumnHelp = 0;
+
 export interface Column<R> {
   readonly title: string;
   readonly help?: string;
@@ -51,7 +73,8 @@ function getHiddenSet(tableId: string, columns: readonly { readonly title: strin
     if (raw !== null) {
       const parsed = JSON.parse(raw) as unknown;
       if (Array.isArray(parsed)) {
-        set = new Set(parsed.filter((x): x is string => typeof x === "string"));
+        set = new Set(columns.filter((c) => parsed.includes(c.title)).map((c) => c.title))
+        if (set.size === columns.length) set.clear();
         hiddenColumnsByTable.set(tableId, set);
         return set;
       }
@@ -79,110 +102,115 @@ export function table<R>(
   rowClass?: (row: R) => string | null,
   tableId?: string,
 ): HTMLElement {
-  if (rows.length === 0) return h("p", { class: "muted" }, empty);
+  if (rows.length === 0) return h("p", { class: "card p-5 muted mb-0" }, empty);
   const container = h("div", {});
 
-  const renderInner = () => {
-    container.replaceChildren();
-    const hidden = tableId === undefined ? new Set<string>() : getHiddenSet(tableId, columns);
-    const visibleCols = columns.filter((c) => !hidden.has(c.title));
-    const activeCols = visibleCols.length > 0 ? visibleCols : columns;
+  const hidden = tableId === undefined ? new Set<string>() : getHiddenSet(tableId, columns);
+  const tablePanel = h("div", { class: "table-responsive table-card", tabindex: "0" });
 
-    if (tableId !== undefined) {
-      container.append(
-        h(
-          "div",
-          { class: "col-toggles" },
-          h("span", { class: "muted small" }, "Columns:"),
-          columns.map((c) => {
-            const isVisible = !hidden.has(c.title);
-            const btn = h(
-              "button",
-              {
-                type: "button",
-                class: `col-toggle ${isVisible ? "active" : "off"}`,
-                "aria-pressed": String(isVisible),
-                title: isVisible ? `Hide "${c.title}" column` : `Show "${c.title}" column`,
-              },
-              c.title,
-            );
-            btn.addEventListener("click", () => {
-              if (hidden.has(c.title)) {
-                hidden.delete(c.title);
-              } else if (columns.length - hidden.size > 1) {
-                hidden.add(c.title);
-              }
-              saveHiddenSet(tableId, hidden);
-              renderInner();
-            });
-            return btn;
-          }),
-          hidden.size > 0
-            ? (() => {
-                const resetBtn = h("button", { type: "button", class: "col-toggle reset", title: "Show all columns" }, "Show all");
-                resetBtn.addEventListener("click", () => {
-                  hidden.clear();
-                  saveHiddenSet(tableId, hidden);
-                  renderInner();
-                });
-                return resetBtn;
-              })()
-            : null,
-        ),
-      );
-    }
-
-    container.append(
+  const renderRows = () => {
+    const activeCols = columns.filter((c) => !hidden.has(c.title));
+    const scroll = tablePanel.scrollLeft;
+    tablePanel.replaceChildren(
       h(
-        "div",
-        { class: "table-wrap" },
+        "table",
+        { class: "table table-hover align-middle text-nowrap" },
         h(
-          "table",
+          "thead",
           {},
           h(
-            "thead",
+            "tr",
             {},
-            h(
-              "tr",
-              {},
-              activeCols.map((c) => {
-                const cls = [c.numeric ? "num" : "", c.help !== undefined ? "has-help" : ""].filter(Boolean).join(" ");
-                return h(
-                  "th",
-                  cls === "" ? {} : { class: cls },
-                  c.title,
-                  c.help === undefined
-                    ? null
-                    : h("span", { class: "col-help", tabindex: "0", "aria-label": c.help }, " ⓘ", h("span", { class: "col-tip" }, c.help)),
-                );
-              }),
-            ),
-          ),
-          h(
-            "tbody",
-            {},
-            rows.map((row) => {
-              const cls = rowClass?.(row) ?? null;
+            activeCols.map((c) => {
+              const helpId = c.help === undefined ? undefined : `column-help-${++nextColumnHelp}`;
               return h(
-                "tr",
-                cls === null ? {} : { class: cls },
-                activeCols.map((c) => h("td", c.numeric ? { class: "num" } : {}, c.cell(row))),
+                "th",
+                { scope: "col", class: c.numeric ? "num" : "", ...(c.help === undefined ? {} : { title: c.help }) },
+                c.title,
+                helpId === undefined || c.help === undefined
+                  ? null
+                  : [
+                      h("button", { class: "btn-text btn-sm col-help", type: "button", popovertarget: helpId, "aria-label": c.help }, " ⓘ"),
+                      h("span", { id: helpId, class: "popover show column-popover", popover: "auto" }, h("span", { class: "popover-body d-block" }, c.help)),
+                    ],
               );
             }),
           ),
         ),
+        h(
+          "tbody",
+          {},
+          rows.map((row) => {
+            const cls = rowClass?.(row) ?? null;
+            return h(
+              "tr",
+              cls === null ? {} : { class: cls },
+              activeCols.map((c) => h("td", c.numeric ? { class: "num" } : {}, c.cell(row))),
+            );
+          }),
+        ),
       ),
     );
+    tablePanel.scrollLeft = scroll;
   };
 
-  renderInner();
+  if (tableId !== undefined) {
+    // Bootstrap Menu styling with native popover dismissal and checkbox semantics (R-31, ADR 0019).
+    const menuId = `columns-${tableId}`;
+    const trigger = h("button", {
+      id: `${menuId}-toggle`, class: "btn btn-sm", type: "button", popovertarget: menuId,
+    }, "Columns", svg("svg", { width: 12, height: 12, viewBox: "0 0 12 12", "aria-hidden": "true", fill: "none", stroke: "currentColor" },
+      svg("path", { d: "m2 4 4 4 4-4" })));
+    const reset = h("button", { id: `${menuId}-reset`, class: "menu-item", type: "button" }, "Show all");
+    const checks = columns.map((column, index) => {
+      const input = h("input", { id: `${menuId}-${index}`, type: "checkbox", class: "m-0" });
+      input.addEventListener("change", () => {
+        if (input.checked) hidden.delete(column.title);
+        else hidden.add(column.title);
+        update();
+      });
+      return { input, title: column.title };
+    });
+    const syncControls = () => {
+      const visibleCount = columns.length - hidden.size;
+      checks.forEach(({ input, title }) => {
+        input.checked = !hidden.has(title);
+        input.disabled = input.checked && visibleCount === 1;
+      });
+      reset.disabled = hidden.size === 0;
+    };
+    const update = () => {
+      saveHiddenSet(tableId, hidden);
+      syncControls();
+      renderRows();
+    };
+    reset.addEventListener("click", () => {
+      hidden.clear();
+      update();
+      checks[0]?.input.focus();
+    });
+    syncControls();
+    container.append(h(
+      "div",
+      { class: "d-flex justify-content-end mb-3" },
+      trigger,
+      h("div", { id: menuId, class: "menu column-menu", popover: "auto", role: "group", "aria-labelledby": trigger.id },
+        checks.map(({ input, title }) => h("label", { class: "menu-item" }, input, title)),
+        h("hr", { class: "menu-divider" }),
+        reset,
+      ),
+    ));
+  }
+
+  renderRows();
+  container.append(tablePanel);
   return container;
 }
 
 export function card(label: string, value: Child, ...notes: Child[]): HTMLElement {
   return h(
     "div",
-    { class: "card" },
+    { class: "card p-5" },
     h("div", { class: "label" }, label),
     h("div", { class: "value" }, value),
     notes.map((n) => (n instanceof Element && n.classList.contains("mini-viz") ? n : h("div", { class: "muted small" }, n))),

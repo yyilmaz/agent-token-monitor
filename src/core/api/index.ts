@@ -4,19 +4,20 @@
 
 import { antigravityCapabilities } from "../adapters/antigravity/index.js";
 import { claudeCodeCapabilities } from "../adapters/claude-code/index.js";
+import { codexCapabilities } from "../adapters/codex/index.js";
 import { callWeightedTokens, sessionAdvice, sessionWeightedSummary, type SessionWeightedSummary, tokenWeightsOf } from "../analysis/advice.js";
 import { analyzeCache, type CacheAnalysis, type MissCauseKind, type ModelSource } from "../analysis/cache.js";
 import { openSessions, sessionTree } from "../analysis/live.js";
-import { dayIn, type PricedCall, priceCalls, type UsagePeriodKind, usageTotals } from "../analysis/usage.js";
+import { dayIn, type UsageCall, usageCalls, type UsagePeriodKind, usageTotals } from "../analysis/usage.js";
 import type { Config, ConfigError } from "../config/config.js";
 import type { AdapterOutput, CapabilityTable, Diagnostic, EpochMillis, HarnessId } from "../model/index.js";
 import { compareByTimeThenSource, compareStrings } from "../order.js";
-import { type PriceTable, priceTable } from "../pricing/price.js";
 
 /** Capability tables of the adapters that exist (ADR 0008). */
 export const CAPABILITIES: Readonly<Partial<Record<HarnessId, CapabilityTable>>> = {
   claudeCode: claudeCodeCapabilities,
   antigravity: antigravityCapabilities,
+  codex: codexCapabilities,
 };
 
 /** Which harnesses this computer has and whether their logs are read (R-20, R-21, R-23). */
@@ -33,14 +34,13 @@ export interface Analysis {
   readonly sources: readonly HarnessSource[];
   readonly config: Config;
   readonly timeZone: string;
-  readonly table: PriceTable;
   readonly cache: CacheAnalysis;
-  readonly calls: readonly PricedCall[];
+  readonly diagnosticCounts: ReturnType<typeof diagnosticCounts>;
+  readonly calls: readonly UsageCall[];
 }
 
 /** Everything that does not depend on the "as of" time. */
 export function analyze(data: AdapterOutput, config: Config, timeZone: string, sources: readonly HarnessSource[] = []): Analysis {
-  const table = priceTable(config.pricing);
   const cache = analyzeCache(data, config);
   const ordered = [...data.calls].sort((a, b) => compareByTimeThenSource(a, b) || compareStrings(a.id, b.id));
   return {
@@ -48,9 +48,9 @@ export function analyze(data: AdapterOutput, config: Config, timeZone: string, s
     sources,
     config,
     timeZone,
-    table,
     cache,
-    calls: priceCalls(ordered, data.sessions, config, table),
+    diagnosticCounts: diagnosticCounts(data.diagnostics),
+    calls: usageCalls(ordered, data.sessions, config),
   };
 }
 
@@ -59,9 +59,15 @@ interface Envelope {
   readonly asOf: EpochMillis;
   readonly timeZone: string;
   readonly configuration: Config;
+  readonly diagnosticCount: number;
 }
 
-const envelope = (analysis: Analysis, asOf: EpochMillis): Envelope => ({ asOf, timeZone: analysis.timeZone, configuration: analysis.config });
+const envelope = (analysis: Analysis, asOf: EpochMillis): Envelope => ({
+  asOf,
+  timeZone: analysis.timeZone,
+  configuration: analysis.config,
+  diagnosticCount: analysis.diagnosticCounts.errors + analysis.diagnosticCounts.warnings,
+});
 
 /** Every response when the configuration is invalid: errors and no results (ADR 0007). */
 export function configErrorResponse(errors: readonly ConfigError[]) {
@@ -70,21 +76,22 @@ export function configErrorResponse(errors: readonly ConfigError[]) {
 
 export function overview(analysis: Analysis, asOf: EpochMillis) {
   const today = dayIn(asOf, analysis.timeZone);
+  const weights = tokenWeightsOf(analysis.config);
   const day = usageTotals(
     analysis.calls.filter((c) => dayIn(c.call.timestamp, analysis.timeZone) === today),
     "day",
     analysis.timeZone,
-    analysis.table,
+    weights,
   )[0];
   const month = usageTotals(
     analysis.calls.filter((c) => dayIn(c.call.timestamp, analysis.timeZone).slice(0, 7) === today.slice(0, 7)),
     "month",
     analysis.timeZone,
-    analysis.table,
+    weights,
   )[0];
   const open = openSessions(analysis.data, analysis.cache, analysis.config, asOf);
   const tree = sessionTree(analysis.data.sessions, open);
-  const advice = sessionAdvice(analysis.data, analysis.cache, open, analysis.config, analysis.table, asOf);
+  const advice = sessionAdvice(analysis.data, analysis.cache, open, analysis.config, asOf);
   const sessionLoads: Record<string, SessionWeightedSummary> = {};
   for (const row of tree) {
     sessionLoads[row.sessionId] = sessionWeightedSummary(row.sessionId, analysis.data, analysis.config);
@@ -98,12 +105,12 @@ export function overview(analysis: Analysis, asOf: EpochMillis) {
     thisMonth: { period: today.slice(0, 7), usage: month ?? null },
     // ADR 0017: one advice per open top-level session (keep going, compact, start fresh).
     sessionAdvice: advice.advice,
-    diagnostics: diagnosticCounts(analysis.data.diagnostics),
+    diagnostics: analysis.diagnosticCounts,
   };
 }
 
 export function usage(analysis: Analysis, asOf: EpochMillis, by: UsagePeriodKind) {
-  return { ...envelope(analysis, asOf), by, sources: analysis.sources, periods: usageTotals(analysis.calls, by, analysis.timeZone, analysis.table) };
+  return { ...envelope(analysis, asOf), by, sources: analysis.sources, periods: usageTotals(analysis.calls, by, analysis.timeZone, tokenWeightsOf(analysis.config)) };
 }
 
 export interface CauseTotal {
@@ -176,7 +183,6 @@ export function session(analysis: Analysis, asOf: EpochMillis, sessionId: string
         call: c.call,
         model: c.model,
         modelSource: c.modelSource,
-        cost: c.cost,
         cache: cacheById.get(c.call.id) ?? null,
         weightedTokens: callWeightedTokens(c.call, weights),
       })),

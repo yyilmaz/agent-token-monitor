@@ -1,8 +1,8 @@
 // ADVICE-1 and WORKFLOW-1 in words (ADR 0017): the tag and the figures behind it on the Now view.
-// Fixed English templates filled with the figures (R-04, R-11). Cost only: the product cannot measure lost detail.
+// Fixed English templates filled with the figures (R-04, R-11). Token load: the product cannot measure lost detail.
 
-import type { AdviceOption, ContextState, OptionCost, SessionAdvice, WorkflowProfile } from "../../src/core/analysis/advice.js";
-import { h } from "./dom.js";
+import type { AdviceOption, ContextState, OptionLoad, SessionAdvice, WorkflowProfile } from "../../src/core/analysis/advice.js";
+import { disclosure, h, sessionLink } from "./dom.js";
 import * as f from "./format.js";
 
 const TAG: Readonly<Record<AdviceOption, readonly [string, string]>> = {
@@ -22,15 +22,13 @@ const WORKFLOW_TAG: Readonly<Record<ContextState, readonly [string, string]>> = 
 const UNKNOWN: Readonly<Record<NonNullable<SessionAdvice["unknownReason"]>, string>> = {
   modelUnknown: "the log records no model",
   contextUnknown: "the context size is not logged",
-  unpricedModel: "this model has no price",
-  writePriceUnknown: "the price table lists no cache-write price",
   freshStartUnknown: "too few sessions to know a typical fresh start",
   postCompactionUnknown: "too few compactions to know the size after one",
   summaryUnknown: "too few compactions with a logged summary size",
   remainingUnknown: "too few sessions of this size to know how long they go on",
 };
 
-export const COST_ONLY = "Compares cost only: a summary or a new session loses detail, which the logs cannot show.";
+export const TOKEN_LOAD_NOTE = "Compacting or starting fresh can discard details that still matter.";
 
 /** Short one-line summary shown directly below the badge. */
 function workflowSubtitle(w: WorkflowProfile): string {
@@ -49,8 +47,8 @@ function workflowSubtitle(w: WorkflowProfile): string {
   return parts.join(" · ");
 }
 
-/** The badge for a session; falls back to WORKFLOW-1 when price-based advice is unknown, and expandable details one level deeper. */
-export function adviceTag(a: SessionAdvice | null | undefined, decimals: number): HTMLElement {
+/** The badge for a session; falls back to WORKFLOW-1 when weighted token advice is unknown, and expandable details one level deeper. */
+export function adviceTag(a: SessionAdvice | null | undefined): HTMLElement {
   if (a === null || a === undefined) return h("span", { class: "muted" }, "");
   if (a.advice === null) {
     if (a.workflow.contextState !== null) {
@@ -66,8 +64,8 @@ export function adviceTag(a: SessionAdvice | null | undefined, decimals: number)
           },
           wText,
         ),
-        h("div", { class: "advice-sub" }, workflowSubtitle(a.workflow)),
-        adviceDetails(a, decimals),
+        h("div", { class: "muted small mt-1" }, workflowSubtitle(a.workflow)),
+        adviceDetails(a),
       );
     }
     return h("span", { class: "muted", title: `ADVICE-1 · no advice: ${UNKNOWN[a.unknownReason ?? "contextUnknown"]}` }, "—");
@@ -76,9 +74,9 @@ export function adviceTag(a: SessionAdvice | null | undefined, decimals: number)
   return h(
     "div",
     { class: "advice-wrap" },
-    h("span", { class: `badge ${tone}`, title: `ADVICE-1 · ${adviceSentence(a, decimals)} ${COST_ONLY}` }, text),
-    h("div", { class: "advice-sub" }, workflowSubtitle(a.workflow)),
-    adviceDetails(a, decimals),
+    h("span", { class: `badge ${tone}`, title: `ADVICE-1 · ${adviceSentence(a)} ${TOKEN_LOAD_NOTE}` }, text),
+    h("div", { class: "muted small mt-1" }, workflowSubtitle(a.workflow)),
+    adviceDetails(a),
   );
 }
 
@@ -104,29 +102,17 @@ export function workflowSentence(w: WorkflowProfile): string {
   }
 }
 
-/** One sentence: what to do and why, in money. */
-export function adviceSentence(a: SessionAdvice, decimals: number): string {
+/** The recommendation and expected saving in weighted token units (ADR 0017, R-51, R-60). */
+export function adviceSentence(a: SessionAdvice): string {
   if (a.advice === null) return `No advice: ${UNKNOWN[a.unknownReason ?? "contextUnknown"]}.`;
-  const [, compact, fresh] = a.options as readonly [OptionCost, OptionCost, OptionCost];
-  const usual = a.horizonMessages === null ? "" : `you usually send about ${a.horizonMessages} more`;
-  const money = (m: string | null) => (m === null ? "unknown" : f.money(m, decimals, a.currency));
-  const after = (o: OptionCost) => (o.breakEvenMessages === null ? "never" : `after ${o.breakEvenMessages} more messages`);
-  // The other two options' totals ride along, so a close call between compacting and a new session shows.
-  const over = `over your usual ${a.horizonMessages} messages`;
-  switch (a.advice) {
-    case "keepGoing":
-      return `Keep going. Compacting pays off only ${after(compact)}, a new session ${after(fresh)}; ${usual}.`;
-    case "compact":
-      return `Compact now${a.warm ? ", while the cache is warm" : ""}. Saves about ${money(a.saving)} ${over}: compacting costs ${money(compact.total)}, a new session ${money(fresh.total)}.`;
-    case "startFresh":
-      return a.warm
-        ? `Start a new session. Saves about ${money(a.saving)} ${over}: a new session costs ${money(fresh.total)}, compacting ${money(compact.total)}.`
-        : `Start a new session. The cache is cold: compacting now costs ${money(compact.oneTime)}, a new session ${money(fresh.oneTime)}.`;
-  }
+  const [, compact, fresh] = a.options as readonly [OptionLoad, OptionLoad, OptionLoad];
+  const recommendation = { keepGoing: "Keep going", compact: "Compact now", startFresh: "Start a new session" }[a.advice];
+  return `${recommendation}. Expected saving vs. keeping going: ${f.compactTokens(a.saving)} weighted token units over ${a.horizonMessages} messages. ` +
+    `Compacting uses ${f.compactTokens(compact.total)} units and a fresh session uses ${f.compactTokens(fresh.total)} units.`;
 }
 
 /** The figures behind the advice, one level deeper (R-17, R-63). */
-export function adviceDetails(a: SessionAdvice, decimals: number): HTMLElement | null {
+export function adviceDetails(a: SessionAdvice): HTMLElement | null {
   const w = a.workflow;
   const workflowNote = h(
     "p",
@@ -137,51 +123,54 @@ export function adviceDetails(a: SessionAdvice, decimals: number): HTMLElement |
   );
   if (a.advice === null) {
     if (w.contextState === null) return null;
-    return h(
-      "details",
-      {},
-      h("summary", { class: "small" }, "Why?"),
+    return disclosure(
+      "Why?",
       workflowNote,
-      h("p", { class: "muted small" }, `List-price comparison (ADVICE-1) unavailable: ${UNKNOWN[a.unknownReason ?? "contextUnknown"]}.`),
+      h("p", { class: "muted small" }, `Weighted token comparison (ADVICE-1) unavailable: ${UNKNOWN[a.unknownReason ?? "contextUnknown"]}.`),
     );
   }
-  const money = (m: string) => f.money(m, decimals, a.currency);
   const name: Readonly<Record<AdviceOption, string>> = { keepGoing: "Keep going", compact: "Compact", startFresh: "New session" };
   const { freshStart, postCompaction, summary, remaining } = a.figures;
-  return h(
-    "details",
-    {},
-    h("summary", { class: "small" }, "Why?"),
+  return disclosure(
+    "Why?",
     workflowNote,
     h(
       "p",
       { class: "muted small" },
-      `Context now ${f.tokens(a.contextTokens)} tokens, cache ${a.warm ? "warm" : "cold"}, writes priced at the ${f.duration(a.writeLifetimeSeconds)} lifetime. ` +
+      `Context now ${f.tokens(a.contextTokens)} tokens, cache ${a.warm ? "warm" : "cold"}. ` +
         `After compacting: ${f.tokens(postCompaction?.medianContextTokens ?? null)} (POSTCOMPACT-1, ${postCompaction?.compactions} compactions), ` +
         `summary ${f.tokens(summary?.medianTokens ?? null)} (SUMMARY-1, an estimate: the summarization request is not logged). ` +
         `A new session starts at ${f.tokens(freshStart?.medianContextTokens ?? null)} (FRESH-1). ` +
         `Sessions of this size usually send ${a.horizonMessages} more messages (REMAIN-1, ${remaining?.sessions} sessions).`,
     ),
     h(
-      "table",
-      { class: "small" },
-      h("thead", {}, h("tr", {}, ["Option", "Now", "Per message", `Over ${a.horizonMessages} messages`, "Pays off"].map((t) => h("th", {}, t)))),
+      "div",
+      { class: "table-responsive table-card", tabindex: "0" },
       h(
-        "tbody",
-        {},
-        a.options.map((o) =>
-          h(
-            "tr",
-            o.option === a.advice ? { class: "chosen" } : {},
-            h("td", {}, name[o.option]),
-            h("td", { class: "num" }, money(o.oneTime)),
-            h("td", { class: "num" }, money(o.perMessage)),
-            h("td", { class: "num" }, money(o.total)),
-            h("td", { class: "num" }, o.option === "keepGoing" ? "" : o.breakEvenMessages === null ? "never" : `after ${o.breakEvenMessages}`),
+        "table",
+        { class: "table table-sm align-middle text-nowrap small" },
+        h("thead", {}, h("tr", {}, ["Option", "Initial units", "Units per message", `Units over ${a.horizonMessages} messages`, "Break-even"].map((t) => h("th", { scope: "col" }, t)))),
+        h(
+          "tbody",
+          {},
+          a.options.map((o) =>
+            h(
+              "tr",
+              o.option === a.advice ? { class: "table-active fw-semibold" } : {},
+              h("td", {}, name[o.option]),
+              h("td", { class: "num" }, f.compactTokens(o.oneTime)),
+              h("td", { class: "num" }, f.compactTokens(o.perMessage)),
+              h("td", { class: "num" }, f.compactTokens(o.total)),
+              h("td", { class: "num" }, o.option === "keepGoing" ? "" : o.breakEvenMessages === null ? "never" : `after ${o.breakEvenMessages}`),
+            ),
           ),
         ),
       ),
     ),
-    h("p", { class: "muted small" }, `${COST_ONLY} ${a.label}`),
+    h("p", { class: "muted small" },
+      `ADVICE-1 weights: cache read ×${a.weights.cacheRead}, cache write ×${a.weights.cacheWrite}, output ×${a.weights.output}. `,
+      sessionLink(a.sessionId, "Session evidence"),
+    ),
+    h("p", { class: "muted small" }, TOKEN_LOAD_NOTE),
   );
 }

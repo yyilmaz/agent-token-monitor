@@ -19,7 +19,7 @@ Working rules for every AI agent (Antigravity, Claude Code, Codex, OpenCode, …
 - **Only the owner changes the SRS.** Agents MAY propose a change: describe it and wait.
 - **Every decision must keep the product shippable as a native VS Code extension (R-26).** If it would not work inside the VS Code extension host or a Webview, stop and ask.
 - **Every significant technical decision is an ADR first** (language, library, data format, algorithm with tunable parameters, UI technology). Write it as `Proposed` using `docs/adr/README.md`. Do not implement it until the owner accepts it.
-- **No history in the repository.** Documents state only the current truth. When a decision changes, revise the ADR; when it no longer applies, delete it. No superseded ADRs, revision logs or "previously" notes. Git history is the archive.
+- **Keep code, documentation and ADRs aligned with the current state.** Revise an ADR when its decision changes. Delete it when the decision no longer applies and move any still-valid decisions into the ADRs that govern them. No `Partial` or superseded ADRs, revision logs or "previously" notes. Git history is the archive.
 
 ## 4. Hard rules (never break)
 

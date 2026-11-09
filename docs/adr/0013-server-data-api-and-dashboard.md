@@ -2,11 +2,11 @@
 
 - Status: Accepted
 - Date: 2026-10-31
-- Requirements: R-10, R-14, R-15, R-16, R-17, R-18, R-23, R-25, R-26, R-30, R-31, R-32, R-33, R-51a, R-63, R-72
+- Requirements: R-10, R-14, R-15, R-16, R-17, R-18, R-23, R-25, R-26, R-30, R-31, R-32, R-33, R-51, R-63, R-72
 
 ## Context
 
-ADR 0002 decides a local backend that serves a JSON API and the frontend, ADR 0005 a single page in plain TypeScript that polls the backend, and ADR 0006 the host interfaces. The cache and pricing analysis are in place (ADR 0009, ADR 0011). What is missing:
+ADR 0002 decides a local backend that serves a JSON API and the frontend, ADR 0005 a single page in plain TypeScript that polls the backend, and ADR 0006 the host interfaces. ADR 0009 defines cache analysis. This ADR defines:
 
 - the usage totals by day, month and session (R-33 view 2) and the open-sessions view (R-33 view 1), both rules with parameters;
 - how the server runs, what it exposes, and when it re-reads the logs;
@@ -20,8 +20,8 @@ Session advice (R-60, R-62) is decided in ADR 0017. Report export (R-71) is deci
 
 **Rule `USE-1`.** Usage is summed per **day**, per **month** and per **session**, each split by harness, effective model (`MODEL-1`) and project:
 
-- token figures: calls, `inputUncached`, `cacheRead`, `cacheWrite`, `output`, `reasoning`, each with the number of calls where it is `unknown` (R-16);
-- currency: `PRICE-2` totals of ADR 0011, with their "incomplete" count and effective dates (R-51a).
+- token figures: calls, `inputUncached`, `cacheRead`, `cacheWrite`, `output`, `reasoning`, each token field with the number of calls where it is `unknown` (R-16).
+- weighted token units for the full period and each harness: sum the per-call rounded load using the configured weights and calculation in ADR 0017. Count calls whose weighted load is unknown separately (R-16, R-51).
 
 A call belongs to the day and month of its timestamp in the time zone `usage.timeZone`. Its default, `"system"`, means the zone the host reports; any IANA zone name (e.g. `"Europe/Istanbul"`) may be set instead. The host passes the resolved zone name to the core next to the "as of" time, so it is an explicit input like the clock (R-10), and every response names it. The core converts with the built-in `Intl.DateTimeFormat`, which needs no host access.
 
@@ -59,22 +59,22 @@ All responses are JSON with sorted keys (ADR 0007) and carry `asOf`, `timeZone` 
 | `GET /api/overview` | open sessions (`LIVE-1`), session advice (`ADVICE-1`), today and this month (`USE-1`), diagnostics counts | yes |
 | `GET /api/usage?by=day\|month\|session` | `USE-1` totals | when the view is open |
 | `GET /api/cache` | lifetime groups, declared lifetimes per model and miss-cause totals (ADR 0009) | when the view is open |
-| `GET /api/sessions/<id>` | one session: its calls in order with tokens, cost, cache class, loss, cause and source lines | when opened |
+| `GET /api/sessions/<id>` | one session: its calls in order with tokens, cache class, loss, cause and source lines | when opened |
 | `GET /api/diagnostics` | all adapter diagnostics | when opened |
 
-The page polls only the endpoint of the view on screen, every `ui.pollIntervalSeconds`.
+The page polls only the endpoint of the view on screen, every `ui.pollIntervalSeconds`. Each successful response carries the error and warning total (`diagnosticCount`) for the navbar link (R-23).
 
 ### Dashboard views
 
-One page, one view at a time, chosen from a fixed tab bar (R-33). The first screen answers "what is happening now and what did it cost" without scrolling (R-30):
+One page, one view at a time, chosen from a fixed tab bar (R-33). The first screen puts open sessions first so the developer can see current activity without scrolling (R-30).
 
-1. **Now:** open sessions with cache status and session advice; today's and this month's tokens and currency side by side; log diagnostics link when present. Nothing else.
-2. **Usage:** day, month and session tables with a time-series chart; split by harness, model or project.
+1. **Now:** open sessions with cache status and session advice.
+2. **Usage:** a summary and daily total-token chart for today or a configured date range, with a breakdown by harness, model or project. Three charts below the breakdown show daily input tokens (uncached input, cache reads and cache writes), output tokens and weighted token units over the same range. Each chart can show all harnesses combined or show individual harnesses whose bars can be toggled in the legend. The charts sum known counts and leave days with only unknown counts blank. Today uses the configured usage time zone and compares with the previous calendar day.
 3. **Cache:** survived and gone counts by gap band, observed and declared lifetimes, miss causes with re-read tokens.
 
 A session row anywhere opens the **session drill-down**: its call timeline, context growth, each cache loss with its cause, and its subagents. Unknown values are written `unknown` (R-16); derived values carry their rule ID. Prompt text, code and file contents are never shown, because the API never carries them (R-18).
 
-Colors come from CSS variables, with light and dark sets chosen by `prefers-color-scheme`.
+The dashboard uses Bootstrap components, including Navbar for top navigation (ADR 0019). Bootstrap and the dashboard CSS variables follow the selected theme, defaulting to the system light or dark preference.
 
 ### Parameters
 

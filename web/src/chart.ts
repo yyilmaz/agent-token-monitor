@@ -76,8 +76,8 @@ function aligned(series: Series): { groups: readonly Group[]; data: uPlot.Aligne
 /** A bar chart of one or more series; it is drawn once the element is in the page, at the element's width. */
 export function barChart(series: Series): HTMLElement {
   const layout = aligned(series);
-  // A different set of series is a different chart: uPlot cannot add or drop series in place.
-  const key = `${series.period} ${series.title} ${layout.groups.map((g) => g.label).join("|")}`;
+  // Rebuild for a different series set or theme. uPlot reads canvas colors when the chart is created.
+  const key = `${document.documentElement.dataset.bsTheme} ${series.period} ${series.title} ${layout.groups.map((g) => g.label).join("|")}`;
   const data = JSON.stringify(layout.data);
   const existing = live.get(key);
   if (existing) {
@@ -89,7 +89,7 @@ export function barChart(series: Series): HTMLElement {
     }
     return existing.element;
   }
-  const entry: Live = { element: h("div", { class: "chart" }), series, chart: null, data, used: true };
+  const entry: Live = { element: h("div", { class: "card p-3 chart" }), series, chart: null, data, used: true };
   live.set(key, entry);
   requestAnimationFrame(() => {
     if (live.get(key) !== entry) return;

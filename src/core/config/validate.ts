@@ -55,12 +55,6 @@ function check(schema: Schema, value: unknown, path: string, options: ValidateOp
       }
       return;
 
-    case "date":
-      if (typeof value !== "string" || !isCalendarDate(value)) {
-        errors.push({ path, message: `expected a date as YYYY-MM-DD, found ${describe(value)}` });
-      }
-      return;
-
     case "array": {
       if (!Array.isArray(value)) {
         errors.push({ path, message: `expected an array, found ${describe(value)}` });
@@ -113,9 +107,6 @@ function check(schema: Schema, value: unknown, path: string, options: ValidateOp
         else if (schema.keys !== null && !schema.keys.includes(key)) {
           errors.push({ path: join(path, key), message: `unknown key; allowed: ${schema.keys.join(", ")}` });
           continue;
-        } else if (schema.secondsKeys && !/^[1-9][0-9]*$/.test(key)) {
-          errors.push({ path: join(path, key), message: "key must be a whole number of seconds, at least 1" });
-          continue;
         }
         check(schema.values, value[key], join(path, key), options, errors);
       }
@@ -127,14 +118,6 @@ function check(schema: Schema, value: unknown, path: string, options: ValidateOp
 function hasAtMostDecimals(value: number, decimals: number): boolean {
   const scale = 10 ** decimals;
   return Math.round(value * scale) / scale === value;
-}
-
-function isCalendarDate(value: string): boolean {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (match === null) return false;
-  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

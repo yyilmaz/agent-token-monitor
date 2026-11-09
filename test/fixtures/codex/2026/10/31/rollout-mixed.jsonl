@@ -1,0 +1,10 @@
+{"timestamp":"2026-10-31T11:59:00Z","type":"session_meta","payload":{"id":"fixture-main","cwd":"/fixture/project"}}
+{"timestamp":"2026-10-31T11:59:01Z","type":"turn_context","payload":{"model":"fixture-model"}}
+{"timestamp":"2026-10-31T11:59:02Z","type":"event_msg","payload":{"type":"user_message"}}
+{"timestamp":"2026-10-31T11:59:03Z","type":"token_usage_record","payload":{"response_id":"fixture-response","usage":{"input_tokens":100,"cached_input_tokens":60,"cache_write_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":5,"total_tokens":120},"thread_token_usage":{"total_tokens":120}}}
+{"timestamp":"2026-10-31T11:59:04Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":60,"cache_write_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":5,"total_tokens":120},"total_token_usage":{"total_tokens":120}}}}
+{"timestamp":"2026-10-31T11:59:05Z","type":"event_msg","payload":{"type":"token_count","info":null,"rate_limits":{"primary":{"used_percent":12.5,"window_minutes":300,"resets_at":1793451600},"secondary":{"used_percent":20}}}}
+{"timestamp":"2026-10-31T11:59:06Z","type":"compacted","payload":{}}
+{"timestamp":"2026-10-31T11:59:07Z","type":"turn_context","payload":{"model":"fixture-model-next"}}
+{"timestamp":"2026-10-31T11:59:08Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":60,"cache_write_input_tokens":0,"output_tokens":20,"reasoning_output_tokens":5,"total_tokens":120},"total_token_usage":{"total_tokens":120}}}}
+{"timestamp":"2026-10-31T11:59:09Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":30,"cached_input_tokens":10,"output_tokens":10,"total_tokens":40},"total_token_usage":{"total_tokens":160}}}}

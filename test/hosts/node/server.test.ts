@@ -58,7 +58,7 @@ describe("standalone server", () => {
       logRoots: {
         claudeCode: [join(FIXTURES, "claude-code", "projects")],
         antigravity: [join(FIXTURES, "antigravity", "brain")],
-        codex: [],
+        codex: [join(FIXTURES, "codex")],
       },
     });
   });
@@ -93,11 +93,30 @@ describe("standalone server", () => {
     assert.equal((await get(ctx.port, "/%2e%2e/package.json")).status, 404);
   });
 
+  it("serves the Bootstrap navbar assets locally (R-14, ADR 0019)", async () => {
+    const page = await get(ctx.port, "/");
+    assert.match(page.body, /href="vendor\/bootstrap\/bootstrap\.min\.css"/);
+    assert.match(page.body, /src="vendor\/bootstrap\/js\/drawer\.js"/);
+    assert.match(page.body, /class="navbar md:navbar-expand dashboard-navbar"/);
+    assert.match(page.body, /data-bs-target="#nav-drawer"/);
+
+    const css = await get(ctx.port, "/vendor/bootstrap/bootstrap.min.css");
+    assert.equal(css.status, 200);
+    assert.match(css.type, /^text\/css/);
+    const drawer = await get(ctx.port, "/vendor/bootstrap/js/drawer.js");
+    assert.equal(drawer.status, 200);
+    assert.match(drawer.type, /^text\/javascript/);
+    assert.equal((await get(ctx.port, "/vendor/bootstrap/js/util/swipe.js")).status, 200);
+  });
+
   it("answers the data API with the envelope of every response", async () => {
-    const overview = JSON.parse((await get(ctx.port, "/api/overview")).body) as Record<string, unknown>;
+    const response = await get(ctx.port, "/api/overview");
+    const overview = JSON.parse(response.body) as Record<string, unknown>;
+    assert.doesNotMatch(response.body, /"(pricing|currency|cost)"\s*:/, "overview exposes token units only (R-51)");
     assert.deepEqual(Object.keys(overview), [
       "asOf",
       "configuration",
+      "diagnosticCount",
       "diagnostics",
       "openSessions",
       "sessionAdvice",
@@ -110,16 +129,32 @@ describe("standalone server", () => {
     assert.equal(overview["asOf"], NOW);
     assert.equal(overview["timeZone"], "UTC");
     for (const endpoint of ["usage?by=month", "cache", "diagnostics"]) {
-      assert.equal((await get(ctx.port, `/api/${endpoint}`)).status, 200, endpoint);
+      const result = await get(ctx.port, `/api/${endpoint}`);
+      assert.equal(result.status, 200, endpoint);
+      assert.equal(JSON.parse(result.body).diagnosticCount, overview["diagnosticCount"], endpoint);
+      assert.doesNotMatch(result.body, /"(pricing|currency|cost)"\s*:/, endpoint);
     }
     assert.equal((await get(ctx.port, "/api/usage?by=year")).status, 400);
     assert.equal((await get(ctx.port, "/api/nothing")).status, 404);
   });
 
+  it("exposes Codex usage through the dashboard endpoint (ADR 0018, R-22, R-33)", async () => {
+    const response = await get(ctx.port, "/api/usage?by=session");
+    assert.equal(response.status, 200);
+    const usage = JSON.parse(response.body) as ReturnType<typeof import("../../../src/core/api/index.js").usage>;
+    assert.deepEqual(usage.sources.find(({ harness }) => harness === "codex"), { harness: "codex", read: true, files: 2 });
+    const main = usage.periods.find(({ period }) => period === "codex:fixture-main");
+    assert.equal(main?.total.calls, 2);
+    assert.equal(main?.total.inputUncached.total, 60);
+    assert.equal(main?.total.cacheRead.total, 70);
+  });
+
   it("returns one session's calls, and 404 for an unknown session", async () => {
     const usage = JSON.parse((await get(ctx.port, "/api/usage?by=session")).body) as { periods: { period: string }[] };
     const id = usage.periods[0]?.period as string;
-    const one = JSON.parse((await get(ctx.port, `/api/sessions/${encodeURIComponent(id)}`)).body) as { session: { id: string }; calls: unknown[] };
+    const response = await get(ctx.port, `/api/sessions/${encodeURIComponent(id)}`);
+    const one = JSON.parse(response.body) as { session: { id: string }; calls: unknown[] };
+    assert.doesNotMatch(response.body, /"(pricing|currency|cost)"\s*:/, "session calls expose token units only (R-51)");
     assert.equal(one.session.id, id);
     assert.ok(one.calls.length > 0);
     assert.equal((await get(ctx.port, "/api/sessions/none")).status, 404);

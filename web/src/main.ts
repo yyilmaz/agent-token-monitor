@@ -17,10 +17,11 @@ const TABS: readonly [hash: string, label: string][] = [
 
 interface Response {
   readonly asOf: number;
+  readonly diagnosticCount?: number;
   readonly configuration: { readonly ui: { readonly pollIntervalSeconds: number } };
 }
 
-const state: { usage: UsageState } = { usage: { by: "day", split: "total", range: 0, where: "harness", metric: "tokens", chart: "harness" } };
+const state: { usage: UsageState } = { usage: { range: 0, where: "harness", chartModes: {} } };
 let timer: number | undefined;
 let generation = 0;
 
@@ -39,10 +40,8 @@ async function load(): Promise<Response> {
   const { tab, arg } = route();
   switch (tab) {
     case "usage": {
-      // The summary always needs days; the Details table may ask for months or sessions as well.
       const days = await getJson<ReturnType<typeof api.usage>>("/api/usage?by=day");
-      const detail = state.usage.by === "day" ? days : await getJson<ReturnType<typeof api.usage>>(`/api/usage?by=${state.usage.by}`);
-      show(renderUsage(days, detail, state.usage, (next) => {
+      show(renderUsage(days, state.usage, (next) => {
         state.usage = next;
         void refresh();
       }));
@@ -76,7 +75,17 @@ function show(element: HTMLElement): void {
   const scroll = window.scrollY;
   const open = new Set(detailsKeys(view()).filter(([, d]) => d.open).map(([key]) => key));
   for (const [key, d] of detailsKeys(element)) if (open.has(key)) d.open = true;
+  const columns = view().querySelector<HTMLElement>(".column-menu:popover-open");
+  const focusId = columns?.parentElement?.contains(document.activeElement) ? document.activeElement?.id : undefined;
   view().replaceChildren(element);
+  if (columns !== null) {
+    const menu = document.getElementById(columns.id);
+    const trigger = document.getElementById(`${columns.id}-toggle`);
+    if (menu !== null && trigger !== null) {
+      menu.showPopover({ source: trigger });
+      if (focusId) document.getElementById(focusId)?.focus({ preventScroll: true });
+    }
+  }
   sweepCharts();
   window.scrollTo(0, scroll);
 }
@@ -101,13 +110,15 @@ async function refresh(): Promise<void> {
     const data = await load();
     if (mine !== generation) return;
     interval = data.configuration.ui.pollIntervalSeconds;
+    diagnosticsCount = data.diagnosticCount;
+    renderDiagnosticsTab();
     status.textContent = `Updated ${new Date(data.asOf).toLocaleTimeString()}`;
     status.classList.remove("error");
   } catch (error) {
     if (mine !== generation) return;
     if (error instanceof ConfigErrors) {
       view().replaceChildren(
-        h("h2", { class: "error" }, "The configuration has errors. No results are shown until they are fixed."),
+        h("h2", { class: "alert theme-danger error" }, "The configuration has errors. No results are shown until they are fixed."),
         table(
           [
             { title: "File", cell: (e: ConfigErrors["errors"][number]) => e.file },
@@ -126,13 +137,80 @@ async function refresh(): Promise<void> {
 
 function renderTabs(): void {
   const { tab } = route();
-  const nav = document.getElementById("tabs") as HTMLElement;
-  nav.replaceChildren(...TABS.map(([hash, label]) => h("a", hash === tab ? { href: `#${hash}`, "aria-current": "page" } : { href: `#${hash}` }, label)));
+  for (const link of tabs.querySelectorAll("a")) {
+    const active = link.hash === `#${tab}`;
+    link.classList.toggle("active", active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  }
+  renderDiagnosticsTab();
 }
+
+// The visible view's API envelope keeps the navbar count current without an extra poll (R-23, ADR 0013).
+let diagnosticsCount: number | undefined;
+const diagnosticsBadge = h("span", { class: "badge", hidden: "" });
+const diagnosticsTab = h("li", { class: "nav-item" },
+  h("a", { class: "nav-link", href: "#diagnostics" }, "Diagnostics", diagnosticsBadge),
+);
+
+function renderDiagnosticsTab(): void {
+  diagnosticsTab.hidden = diagnosticsCount === 0 && route().tab !== "diagnostics";
+  diagnosticsBadge.hidden = !diagnosticsCount;
+  diagnosticsBadge.textContent = diagnosticsCount ? String(diagnosticsCount) : "";
+}
+
+// Bootstrap 6's mobile drawer manages focus and scroll locking (R-26, ADR 0019).
+const tabs = document.getElementById("tabs") as HTMLUListElement;
+const drawer = document.getElementById("nav-drawer") as HTMLDialogElement;
+const toggle = document.getElementById("nav-toggle") as HTMLButtonElement;
+tabs.replaceChildren(...TABS.map(([hash, label]) =>
+  h("li", { class: "nav-item" }, h("a", { class: "nav-link", href: `#${hash}` }, label)),
+), diagnosticsTab);
+tabs.addEventListener("click", (event) => {
+  if (event.target instanceof HTMLAnchorElement && drawer.open) drawer.requestClose();
+});
+drawer.addEventListener("shown.bs.drawer", () => toggle.setAttribute("aria-expanded", "true"));
+drawer.addEventListener("hidden.bs.drawer", () => toggle.setAttribute("aria-expanded", "false"));
+
+// Bootstrap color modes share one setting with the dashboard palette (R-26, ADR 0019).
+const themeToggle = document.getElementById("theme-toggle") as HTMLButtonElement;
+const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
+const themeKey = "atm.theme";
+let theme: "light" | "dark" | null = null;
+try {
+  const saved = window.localStorage.getItem(themeKey);
+  if (saved === "light" || saved === "dark") theme = saved;
+} catch {
+  // Storage can be restricted by the host.
+}
+
+function applyTheme(): void {
+  const dark = theme === "dark" || (theme === null && systemTheme.matches);
+  document.documentElement.dataset.bsTheme = dark ? "dark" : "light";
+  themeToggle.setAttribute("aria-pressed", String(dark));
+  themeToggle.title = dark ? "Switch to light theme" : "Switch to dark theme";
+}
+
+themeToggle.addEventListener("click", () => {
+  theme = document.documentElement.dataset.bsTheme === "dark" ? "light" : "dark";
+  applyTheme();
+  try {
+    window.localStorage.setItem(themeKey, theme);
+  } catch {
+    // The selected theme still applies for this page.
+  }
+  if (route().tab === "usage") void refresh();
+});
+systemTheme.addEventListener("change", () => {
+  if (theme !== null) return;
+  applyTheme();
+  if (route().tab === "usage") void refresh();
+});
+applyTheme();
 
 window.addEventListener("hashchange", () => {
   renderTabs();
-  view().replaceChildren(h("p", { class: "muted" }, "Loading…"));
+  view().replaceChildren(h("p", { class: "card p-5 muted", role: "status" }, "Loading…"));
   window.scrollTo(0, 0);
   void refresh();
 });

@@ -1,24 +1,18 @@
 # 0017. Session advice: keep going, compact or start fresh
 
 - Status: Accepted
-- Date: 2026-11-01
-- Requirements: R-10, R-11, R-16, R-17, R-22, R-30, R-51a, R-60, R-62, R-63, R-72
+- Date: 2026-11-09
+- Requirements: R-10, R-11, R-16, R-17, R-22, R-30, R-51, R-60, R-62, R-63, R-72
 
 ## Context
 
-A long session can go on in three ways: keep sending messages, compact it (the harness replaces the history with a summary), or start a new session. Each has a different price, and which one is cheapest depends on the moment:
-
-- **Compacting is one request that reads the whole context and writes a summary**, after which the shorter context is written to the cache again. With a warm cache, the read is cheap. With a cold cache, the whole context is first paid again in full, only to be summarized and dropped: the user pays twice.
-- **The summary is output**, the most expensive token type.
-- **Compaction retains a baseline context.** The next call includes the summary, system prompt and tool definitions. The resulting context can exceed the starting context of a fresh session.
-
-R-60 and R-62 ask for concrete advice from fixed rules, with the expected saving from the user's own history.
+An open session can continue, compact its history into a summary, or start fresh. Compaction processes the current context and produces summary tokens, then later calls process the smaller context. A new session starts from its own baseline. R-60 requires an expected token saving based on the user's history, and R-51 limits the comparison to token units.
 
 Claude Code logs what this needs. Each `compact_boundary` line carries `compactMetadata` with `trigger` (`manual` or `auto`), `preTokens` (context before) and `postTokens` (summary size), next to the session's calls before and after it. Antigravity logs a `CHECKPOINT` step without token counts.
 
 ## Decision
 
-All rules are pure functions in `src/core/analysis/` over the normalized model (ADR 0008), the cache analysis (ADR 0009) and the price table (ADR 0011). They look only at sessions that are not subagents: the user drives those, so only they can act on the advice.
+All rules are pure functions in `src/core/analysis/` over the normalized model (ADR 0008), the cache analysis (ADR 0009) and the configured token weights. They look only at sessions that are not subagents: the user drives those, so only they can act on the advice.
 
 ### Compaction figures in the data model
 
@@ -33,27 +27,27 @@ Per harness and effective model (ADR 0009 `MODEL-1`), over the whole history. Wi
 - **`SUMMARY-1`, summary size:** the median `postTokens` of those compactions. The summarization request itself is not logged (ADR 0008), so its output is taken to be the summary. This is a derived estimate, labeled as one.
 - **`REMAIN-1`, messages still to come:** for the context band (`rules.sessionAdvice.contextBandEdgesTokens`) of the session's current context, the median number of turn calls that sessions sent after their context first entered that band. At least `rules.sessionAdvice.minSessions` sessions.
 
-### Cost of each option
+### Weighted token load of each option
 
-**Rule `ADVICE-1`.** For an open session (`LIVE-1`) with context `C`, a priced model (ADR 0011) and known figures above. `r`, `w` and `o` are the cache-read, cache-write and output prices of the tier for the context in question. `w` is for the session's declared lifetime (`DECL-1`), else the reference lifetime of `CAUSE-1`. `P` is `POSTCOMPACT-1`, `S` is `SUMMARY-1` and `F` is `FRESH-1`.
+**Rule `ADVICE-1`.** For an open top-level session (`LIVE-1`), compare the three options using the existing `rules.sessionAdvice.weights`. The weights express relative token processing load, with one uncached input token as the default unit. Compare integer millionths before converting to display units so fractional weights preserve ties and break-even horizons. Each result uses the configured weights and is labeled **weighted token units**.
 
-| Option | One-time cost now | Cost per later message |
+Let `C` be the current context, `P` the context after compaction, `S` the summary size, and `F` the fresh context. Let `r`, `w` and `o` be the configured cache-read, cache-write and output weights.
+
+| Option | Initial load | Load per later message |
 |---|---|---|
-| Keep going, cache warm | 0 | `C × r` |
-| Keep going, cache cold | `C × w` (the next message writes the cache again) | `C × r` |
-| Compact, cache warm | `C × r + S × o + S × w` | `P × r` |
-| Compact, cache cold | `C × w + S × o + P × w` | `P × r` |
-| New session | `F × w` | `F × r` |
+| Keep going, warm | 0 | `C × r` |
+| Keep going, cold | `C × w` | `C × r` |
+| Compact, warm | `C × r + S × o + S × w` | `P × r` |
+| Compact, cold | `C × w + S × o + P × w` | `P × r` |
+| Start fresh | `F × w` | `F × r` |
 
-"Cold" is `LIVE-1`'s `probably cold` or `missed on last call`. With a warm cache, the fixed system prompt and tools stay cached after compacting, so only the summary is written. Output tokens of ordinary messages are the same in every option, so they are left out.
+A session is cold when `LIVE-1` reports `probably cold` or `missed on last call`. The model treats later messages as cache reads and omits their common output load.
 
-Over the horizon `H` = `REMAIN-1`, the total of an option is `one-time + H × per message`. **The advice is the option with the lowest total.** On a tie, the less disruptive one wins: keep going, then compact, then new session. For each option that is not chosen, the advice also shows its **break-even point**: how many more messages it would take to pay off against keeping going, `(one-time − one-time of keeping going) ÷ ((C − its per-message context) × r)`. It shows "never" when the option does not shrink the context.
-
-All figures are exact currency sums (ADR 0011 `PRICE-1`), shown with the label "API list-price equivalent, not your bill".
+Use `REMAIN-1` as the horizon `H`. An option's total is its initial load plus `H` times its load per later message. Choose the lowest total, with ties resolved in order: keep going, compact, start fresh. Expected saving is the difference between the keep-going total and the chosen total. For alternatives, report the first nonnegative whole-message horizon at which their total is no greater than the keep-going total. If an option starts above the keep-going total and has an equal or greater per-message load, it never breaks even. If a required historical figure is missing, report `unknown` and identify the missing figure.
 
 ### Workflow profile and subagent split break-even
 
-**Rule `WORKFLOW-1`.** For every open top-level session, whether or not its model is priced, the analysis also computes its deterministic workflow profile from the session's active context window (turn calls after the session's latest `compaction` event, or all turn calls when the session has not been compacted) and subagents:
+**Rule `WORKFLOW-1`.** For every open top-level session, the analysis also computes its deterministic workflow profile from the session's active context window (turn calls after the session's latest `compaction` event, or all turn calls when the session has not been compacted) and subagents:
 
 - `turns`: number of turn calls in the active context window (0 immediately after a compaction before the next turn).
 - `editTurns`: active-window turn calls that invoked at least one edit/write tool (`edit_file`, `write_file`, `replace_file_content`, `multi_replace_file_content`, `Edit`, `MultiEdit`, `Write`, `NotebookEdit`, `apply_patch`).
@@ -72,16 +66,7 @@ All figures are exact currency sums (ADR 0011 `PRICE-1`), shown with the label "
 
 ### What the user sees
 
-One tag per open session, next to its cache status on the Now view (R-30). The tag shows a short text, the saving over `H` against keeping going, the totals of the other options (so a close call between compacting and a new session is visible without a threshold), and a link to the figures:
-
-| Tag | Example text |
-|---|---|
-| `keep going` | "Keep going. Compacting breaks even after five more messages. You usually send about three." |
-| `compact now` | "Compact now, while the cache is warm. Saves about $1.38 over your usual 25 messages: compacting costs $1.12, a new session $1.95." (500,000 tokens, for a user whose new sessions start at 150,000) |
-| `start fresh` | Warm: "Start a new session. Saves about $3.08 over your usual 69 messages: a new session costs $1.76, compacting $1.92." Cold: "Start a new session. The cache is cold: compacting now costs $1.70, a new session $0.30." |
-| `unknown` | "No advice: this model has no price" (or the figure that is missing, R-16). |
-
-Each tag says it compares **cost only**: a summary or a new session loses detail, which the product cannot measure. The figures behind it (C, P, S, F, H, prices, the three totals and the break-even points) open one level deeper, with the rule IDs (R-17, R-63). The product never compacts or starts anything itself (R-62).
+The Now view shows one recommendation per open top-level session with expected weighted token savings, the horizon and the rule ID. Expandable details show the historical inputs, configured weights, all three totals and break-even points (R-17, R-63). The estimate compares token load. Context discarded by compaction or a fresh session can still matter to the user. The product never takes these actions itself (R-62).
 
 ### Parameters
 
@@ -90,39 +75,26 @@ Each tag says it compares **cost only**: a summary or a new session loses detail
 | `rules.freshSession.minSessions` | 5 | a median of fewer sessions says little |
 | `rules.sessionAdvice.minCompactions` | 5 | a median of fewer compactions says little |
 | `rules.sessionAdvice.minSessions` | 5 | the same for messages still to come |
-- `rules.sessionAdvice.contextBandEdgesTokens` | `[50000, 100000, 200000, 500000]` | half-open context bands `[from, to)` for `REMAIN-1` and lean-context floor for `WORKFLOW-1` |
+| `rules.sessionAdvice.contextBandEdgesTokens` | `[50000, 100000, 200000, 500000]` | half-open context bands `[from, to)` for `REMAIN-1` and lean-context floor for `WORKFLOW-1` |
 | `rules.sessionAdvice.recentTurnsWindow` | `5` | recent turns averaged for current step load in `WORKFLOW-1` |
-| `rules.sessionAdvice.weights` | `{ cacheRead: 0.1, inputUncached: 1, cacheWrite: 1.25, output: 5 }` | token weights (`1` = `1` uncached input token) for per-step, active-window, session and subagent weighted load |
+| `rules.sessionAdvice.weights` | `{ cacheRead: 0.1, inputUncached: 1, cacheWrite: 1.25, output: 5 }` | token weights (`1` = `1` uncached input token) for advice and per-step, active-window, session and subagent weighted load |
 
 There are no other thresholds: the advice comes from comparing three totals.
 
-### Worked example
-
-Use illustrative rates of $1 for cache reads, $5 for cache writes, and $10 for output, per million tokens. Take a 200,000-token context, a 100,000-token context after compaction, a 20,000-token summary, and a 60,000-token fresh context.
-
-- **Warm cache:** Keeping the session costs $0.20 per later message. Starting fresh costs $0.30 for the initial cache write and $0.06 per later message. Starting fresh becomes cheaper at three later messages.
-- **Cold cache:** Rewriting the existing context costs $1.00. Compacting costs $1.70 to rewrite the existing context, generate the summary and write the smaller cache. Starting fresh has the lowest initial cost at $0.30.
-
 ## Alternatives considered
 
-- **Token counts only, no prices:** works without a price table, but read, write and output tokens differ in price by up to 100 times. Without prices the advice cannot see that the summary is the expensive part, or that a cold compaction pays twice.
-- **A fixed horizon from configuration (e.g. "the next 20 messages"):** simpler, but a number nobody can justify. `REMAIN-1` comes from the user's own sessions, as R-60 asks.
-- **Taking the post-compaction context to be `postTokens`:** it is logged directly, but it leaves out the system prompt and tools and overstates the saving per message.
-- **Modeling context growth (each message adds tokens):** more exact, but it needs a growth model per user. Leaving growth out understates the cost of keeping going, so the advice errs toward keeping going, the least disruptive choice.
-- **A fourth tag "continue in a side session":** Claude Code side sessions copy the history. With a warm cache they cost about the same as keeping going and do not shrink the context, so they get no tag of their own. Their benefit, keeping side work out of the main context, is not a cost the logs show.
-- **Advice for every harness now:** Antigravity logs no model and no compaction figures, so its advice is `unknown` until it does.
+- **Use raw totals for advice.** Easier to explain, but treats cached reads, cache writes and summary output as equally expensive in processing terms. The configured weights already distinguish these categories in the session load view.
+- **Use a fixed message horizon.** Requires a user-supplied guess. `REMAIN-1` estimates it from the user's history.
+- **Use summary size as the post-compaction context.** Omits the system prompt and tools and overstates the expected saving.
 
 ## VS Code compatibility
 
 - `COMPACT-1` is part of the Claude Code adapter; `FRESH-1`, `POSTCOMPACT-1`, `SUMMARY-1`, `REMAIN-1` and `ADVICE-1` are pure functions over the normalized model with no host access (ADR 0006), and run unchanged in the extension host.
-- The advice travels in the existing overview payload as plain JSON with exact decimal strings (ADR 0011); the Webview renders the tag the same way as the browser.
-- The parameters live in the same configuration file and validator (ADR 0007).
+- The advice travels in the overview payload as JSON token units. The Webview renders the same data as the browser.
+- The parameters live in the configuration file and validator (ADR 0007).
 
 ## Consequences
 
-- Open sessions get one tag with a reason in money, keep going, compact now, or start fresh.
-- The cold-compaction trap becomes visible: the advice never says "compact" for a cold session when a new session is cheaper.
-- The advice depends on the price table: an unpriced model gets no tag. The shipped prices (ADR 0011) cover the current Claude models.
-- `SUMMARY-1` is an estimate because the summarization request is not logged; if Claude Code starts logging it, the rule uses the logged figure instead.
-- ADR 0008 defines the Event's `compaction` field.
-- `GET /api/overview` returns `sessionAdvice`, one `ADVICE-1` per open top-level session; the Now view shows the tag and expandable details in an "Advice" column.
+- The expected saving is a weighted token estimate. Its inputs and units are visible in the dashboard.
+- `SUMMARY-1` estimates summary output from compaction metadata. When required figures are unavailable, the advice is unknown.
+- Usage reports raw token counts and separately labeled weighted token units. Advice reports weighted token units.
