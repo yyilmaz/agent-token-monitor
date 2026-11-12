@@ -16,6 +16,8 @@ export interface UsageState {
   /** Today or an index into `ui.usageRangesDays`. */
   readonly range: "today" | number;
   readonly where: Where;
+  readonly harness: string;
+  readonly project: string;
   readonly chartModes: Readonly<Partial<Record<ChartKind, ChartMode>>>;
 }
 
@@ -32,7 +34,7 @@ export function renderUsage(days: Usage, state: UsageState, onChange: (next: Usa
   const today = dayIn(days.asOf, days.timeZone);
   const current = lastDays(today, length, 0);
   const before = lastDays(today, length, length);
-  const byDay = new Map(days.periods.map((p) => [p.period, p]));
+  const byDay = new Map(days.periods.map((p) => [p.period, filterPeriod(p, state)]));
   const periods = current.map((d) => byDay.get(d));
   const inRange = periods.filter((p): p is UsagePeriod => p !== undefined);
   const previous = before.map((d) => byDay.get(d)).filter((p): p is UsagePeriod => p !== undefined);
@@ -43,12 +45,13 @@ export function renderUsage(days: Usage, state: UsageState, onChange: (next: Usa
     length === 1 ? "today" : String(range),
     (v) => onChange({ ...state, range: v === "today" ? v : Number(v) }),
   );
+  const filters = usageFilters(days.periods, state, onChange);
   const chart = (kind: ChartKind, title: string, unit: string, pick: ChartValue) =>
     dailyChart(xs, periods, kind, title, unit, pick, state, onChange);
   return h(
     "div",
     {},
-    h("div", { class: "d-flex flex-wrap align-items-center gap-4 mb-5" }, rangeButtons, sources(days.sources)),
+    h("div", { class: "d-flex flex-wrap align-items-center gap-3 mb-5" }, rangeButtons, filters, sources(days.sources)),
     h(
       "div",
       { class: "usage-top" },
@@ -56,8 +59,92 @@ export function renderUsage(days: Usage, state: UsageState, onChange: (next: Usa
       chart("total", "Tokens per day", "tokens", all),
     ),
     where(inRange, state, onChange),
-    measureCharts(periods, chart),
+    measureCharts(periods, chart, state.project !== ""),
   );
+}
+
+function usageFilters(allPeriods: readonly UsagePeriod[], state: UsageState, onChange: (next: UsageState) => void): HTMLElement | null {
+  const harnesses = HARNESS_ORDER.filter((id) => allPeriods.some((p) => p.byHarness.some((s) => s.harness === id)));
+  const projects = [...new Set(allPeriods.flatMap((p) => p.byProject.map((s) => f.repository(s.project))))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  if (harnesses.length === 0 && projects.length === 0) return null;
+
+  const harnessSelect = selectControl(
+    "Filter usage by harness",
+    [["", "All harnesses"], ...harnesses.map((id): [string, string] => [id, f.harness(id)])],
+    state.harness,
+    (v) => onChange({ ...state, harness: v, project: "" }),
+  );
+  const projectSelect = selectControl(
+    "Filter usage by project",
+    [["", "All projects"], ...projects.map((p): [string, string] => [p, p])],
+    state.project,
+    (v) => onChange({ ...state, project: v, harness: "" }),
+  );
+  const clear =
+    state.harness === "" && state.project === ""
+      ? null
+      : (() => {
+          const btn = h("button", { type: "button", class: "btn btn-sm col-toggle reset" }, "Clear");
+          btn.addEventListener("click", () => onChange({ ...state, harness: "", project: "" }));
+          return btn;
+        })();
+
+  return h("div", { class: "d-flex flex-wrap align-items-center gap-2" }, harnessSelect, projectSelect, clear);
+}
+
+function selectControl(ariaLabel: string, options: readonly (readonly [string, string])[], value: string, onSelect: (value: string) => void): HTMLSelectElement {
+  const select = h(
+    "select",
+    { class: "form-control form-control-sm w-auto", "aria-label": ariaLabel },
+    options.map(([v, label]) => h("option", v === value ? { value: v, selected: "" } : { value: v }, label)),
+  );
+  select.addEventListener("change", () => onSelect(select.value));
+  return select;
+}
+
+const ZERO_SUM: TokenSum = { total: 0, unknownCalls: 0 };
+const ZERO_FIGURES: UsageFigures = { calls: 0, inputUncached: ZERO_SUM, cacheRead: ZERO_SUM, cacheWrite: ZERO_SUM, output: ZERO_SUM, reasoning: ZERO_SUM };
+
+function sumTokenSums(items: readonly TokenSum[]): TokenSum {
+  return items.reduce((acc, s) => ({ total: acc.total + s.total, unknownCalls: acc.unknownCalls + s.unknownCalls }), ZERO_SUM);
+}
+
+function sumFigures(items: readonly UsageFigures[]): UsageFigures {
+  if (items.length === 0) return ZERO_FIGURES;
+  return {
+    calls: items.reduce((a, x) => a + x.calls, 0),
+    inputUncached: sumTokenSums(items.map((x) => x.inputUncached)),
+    cacheRead: sumTokenSums(items.map((x) => x.cacheRead)),
+    cacheWrite: sumTokenSums(items.map((x) => x.cacheWrite)),
+    output: sumTokenSums(items.map((x) => x.output)),
+    reasoning: sumTokenSums(items.map((x) => x.reasoning)),
+  };
+}
+
+function filterPeriod(p: UsagePeriod, state: UsageState): UsagePeriod {
+  if (state.harness !== "") {
+    const byHarness = p.byHarness.filter((s) => s.harness === state.harness);
+    const total = sumFigures(byHarness.map((s) => s.figures));
+    const weightedItems = byHarness.map((s) => s.weightedTokenUnits).filter((w): w is TokenSum => w !== undefined);
+    const weightedTokenUnits = weightedItems.length === byHarness.length ? sumTokenSums(weightedItems) : { total: 0, unknownCalls: total.calls };
+    return {
+      ...p,
+      total,
+      weightedTokenUnits,
+      byHarness,
+      byModel: p.byModel.filter((s) => s.harness === state.harness),
+    };
+  }
+  if (state.project !== "") {
+    const byProject = p.byProject.filter((s) => f.repository(s.project) === state.project);
+    const total = sumFigures(byProject.map((s) => s.figures));
+    return {
+      ...p,
+      total,
+      byProject,
+    };
+  }
+  return p;
 }
 
 function segmented(options: readonly (readonly [string, string])[], value: string, change: (value: string) => void): HTMLElement {
@@ -116,7 +203,7 @@ function summary(periods: readonly UsagePeriod[], before: readonly UsagePeriod[]
           h("strong", {}, `${((read / input) * 100).toFixed(1)}%`),
           " of the input came from the cache.",
         ),
-    unknown === 0 ? null : h("div", { class: "muted small" }, `Up to ${f.tokens(unknown)} calls did not log every count and are left out.`),
+    unknown === 0 ? null : h("div", { class: "muted small" }, `Up to ${f.tokens(unknown)} ${f.plural(unknown, "call")} did not log every count and ${unknown === 1 ? "is" : "are"} left out.`),
   );
 }
 
@@ -129,10 +216,10 @@ function dailyChart(
   kind: ChartKind, title: string, unit: string, pick: ChartValue,
   state: UsageState, onChange: (next: UsageState) => void,
 ): HTMLElement {
-  const mode = state.chartModes[kind] ?? "harness";
+  const mode = state.project !== "" ? "total" : (state.chartModes[kind] ?? "harness");
   const harnesses = HARNESS_ORDER.filter((id) => periods.some((p) => p?.byHarness.some((s) => s.harness === id)));
   const groups = mode === "total"
-    ? [{ label: "All harnesses", colorVar: "--series-1", ys: periods.map((p) => p === undefined ? 0 : pick(p.total, p.weightedTokenUnits)) }]
+    ? [{ label: state.project !== "" ? state.project : state.harness !== "" ? f.harness(state.harness) : "All harnesses", colorVar: "--series-1", ys: periods.map((p) => p === undefined ? 0 : pick(p.total, p.weightedTokenUnits)) }]
     : harnesses.map((id) => ({
       label: f.harness(id),
       colorVar: HARNESS_COLOR[id] as string,
@@ -141,7 +228,7 @@ function dailyChart(
         return split === undefined ? 0 : pick(split.figures, split.weightedTokenUnits);
       }),
     }));
-  const toggle = segmented(
+  const toggle = state.project !== "" ? null : segmented(
     [
       ["harness", "Per harness"],
       ["total", "Total"],
@@ -152,7 +239,7 @@ function dailyChart(
   return h(
     "div",
     { class: "card p-4 chart-card" },
-    h("div", { class: "d-flex flex-wrap align-items-center gap-4 mb-2" }, toggle),
+    toggle === null ? null : h("div", { class: "d-flex flex-wrap align-items-center gap-4 mb-2" }, toggle),
     barChart({
       title,
       xs,
@@ -210,9 +297,9 @@ function where(periods: readonly UsagePeriod[], state: UsageState, onChange: (ne
 }
 
 /** Separate scales for the recorded token counts and the configured weighted load (R-16, R-33, R-51, ADR 0013). */
-function measureCharts(periods: readonly (UsagePeriod | undefined)[], chart: UsageChart): HTMLElement {
+function measureCharts(periods: readonly (UsagePeriod | undefined)[], chart: UsageChart, projectFiltered = false): HTMLElement {
   // A running host can serve rebuilt UI files before its API code is restarted (ADR 0013).
-  const weightedUnavailable = periods.some((p) =>
+  const weightedUnavailable = projectFiltered || periods.some((p) =>
     p !== undefined && (p.weightedTokenUnits === undefined || p.byHarness.some((s) => s.weightedTokenUnits === undefined)),
   );
   return h(
@@ -220,7 +307,7 @@ function measureCharts(periods: readonly (UsagePeriod | undefined)[], chart: Usa
     { class: "mt-8" },
     h("h2", { class: "mt-0" }, "Usage by token type"),
     h("p", { class: "muted small" }, "Charts sum recorded counts. Days with only unknown counts have no bar."),
-    weightedUnavailable
+    weightedUnavailable && !projectFiltered
       ? h("p", { class: "muted small" }, "Restart the dashboard server to load weighted token units.")
       : null,
     h(

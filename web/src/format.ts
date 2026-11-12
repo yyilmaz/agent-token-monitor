@@ -18,6 +18,11 @@ export function compactTokens(value: number | null): string {
   return String(value);
 }
 
+/** Singular/plural noun for an integer count. */
+export function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+  return count === 1 ? singular : pluralForm;
+}
+
 /** A token count written short, with the exact count on hover. */
 export function tokensShort(value: number | null): HTMLElement {
   const element = document.createElement("span");
@@ -89,7 +94,7 @@ export function promise(groups: readonly DeclaredGroup[], harnessId: string, mod
   const top = g.lifetimes.reduce((best, l) => (l.calls > best.calls ? l : best), g.lifetimes[0] as DeclaredGroup["lifetimes"][number]);
   return {
     main: name(top.seconds),
-    shares: g.lifetimes.map((l) => `${name(l.seconds)} on ${((l.calls / total) * 100).toFixed(0)}% (${tokens(l.calls)} ${l.calls === 1 ? "call" : "calls"})`).join(" · "),
+    shares: g.lifetimes.map((l) => `${name(l.seconds)} on ${((l.calls / total) * 100).toFixed(0)}% (${tokens(l.calls)} ${plural(l.calls, "call")})`).join(" · "),
     latest: name(g.latestSeconds),
   };
 }

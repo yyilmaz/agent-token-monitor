@@ -103,6 +103,7 @@ h2:first-child { margin-top: 0; }
   --bs-table-color: var(--text);
   --bs-table-border-color: var(--border);
   --bs-table-hover-bg-factor: 4%;
+  --bs-table-cell-padding-x: 0.625rem;
 }
 
 .table thead th {
@@ -156,7 +157,7 @@ a { color: var(--accent); text-underline-offset: 0.18em; }
 .chart .u-legend { font-size: 12px; color: var(--muted); }
 
 /* Session tree (TREE-1, ADR 0016): indentation by depth, without inline styles (CSP). */
-.tree { display: inline-block; }
+.tree { display: inline-block; white-space: normal; min-width: 11rem; max-width: 22rem; }
 .tree[data-depth="1"] { padding-left: 16px; }
 .tree[data-depth="2"] { padding-left: 32px; }
 .tree[data-depth="3"] { padding-left: 48px; }

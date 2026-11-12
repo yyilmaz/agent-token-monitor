@@ -9,19 +9,28 @@ import * as f from "../format.js";
 
 type Overview = ReturnType<typeof overview>;
 
+export interface NowState {
+  readonly harness: string;
+  readonly project: string;
+}
+
+const HARNESS_ORDER = ["claudeCode", "antigravity", "codex", "opencode"];
+
 const STATUS: Readonly<Record<OpenSession["cacheStatus"], [string, string]>> = {
   warm: ["warm", "good"],
   probablyCold: ["probably cold", "warn"],
   missedOnLastCall: ["missed on last call", "bad"],
 };
 
-export function renderNow(data: Overview): HTMLElement {
+export function renderNow(data: Overview, state: NowState, onChange: (next: NowState) => void): HTMLElement {
   const adviceById = new Map(data.sessionAdvice.map((a) => [a.sessionId, a]));
+  const rows = filterTree(data.sessionTree, state);
+  const filters = nowFilters(data.sessionTree, state, onChange);
 
   return h(
     "div",
     {},
-    h("h2", {}, "Open sessions"),
+    h("div", { class: "d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3" }, h("h2", { class: "m-0" }, "Open sessions"), filters),
     table(
       [
         { title: "Session", cell: (r: TreeRow) => sessionCell(r) },
@@ -63,6 +72,7 @@ export function renderNow(data: Overview): HTMLElement {
           title: "Total weighted",
           help: "Total weighted load of the session (including child subagents for top-level sessions) so you can compare token load across tasks.",
           numeric: true,
+          defaultHidden: true,
           cell: (r) => {
             const load = data.sessionLoads[r.sessionId];
             if (load === undefined) return "—";
@@ -91,12 +101,74 @@ export function renderNow(data: Overview): HTMLElement {
         // ADR 0017: keep going, compact now or start fresh; the reason in weighted token units on hover.
         { title: "Advice", cell: (r) => adviceTag(adviceById.get(r.sessionId)) },
       ],
-      data.sessionTree,
-      `No session had a call in the last ${f.duration(data.configuration.liveView.openWithinSeconds)}.`,
+      rows,
+      state.harness || state.project
+        ? "No open sessions match the current filters."
+        : `No session had a call in the last ${f.duration(data.configuration.liveView.openWithinSeconds)}.`,
       undefined,
       "open-sessions",
     ),
   );
+}
+
+function nowFilters(tree: readonly TreeRow[], state: NowState, onChange: (next: NowState) => void): HTMLElement | null {
+  if (tree.length === 0) return null;
+  const harnesses = HARNESS_ORDER.filter((id) => tree.some((r) => r.harness === id));
+  const projects = [...new Set(tree.map((r) => f.repository(r.project)))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+  const harnessSelect = selectControl(
+    "Filter by harness",
+    [["", "All harnesses"], ...harnesses.map((id): [string, string] => [id, f.harness(id)])],
+    state.harness,
+    (v) => onChange({ ...state, harness: v }),
+  );
+  const projectSelect = selectControl(
+    "Filter by project",
+    [["", "All projects"], ...projects.map((p): [string, string] => [p, p])],
+    state.project,
+    (v) => onChange({ ...state, project: v }),
+  );
+  const clear =
+    state.harness === "" && state.project === ""
+      ? null
+      : (() => {
+          const btn = h("button", { type: "button", class: "btn btn-sm col-toggle reset" }, "Clear");
+          btn.addEventListener("click", () => onChange({ harness: "", project: "" }));
+          return btn;
+        })();
+
+  return h("div", { class: "d-flex flex-wrap align-items-center gap-2" }, harnessSelect, projectSelect, clear);
+}
+
+function selectControl(ariaLabel: string, options: readonly (readonly [string, string])[], value: string, onSelect: (value: string) => void): HTMLSelectElement {
+  const select = h(
+    "select",
+    { class: "form-control form-control-sm w-auto", "aria-label": ariaLabel },
+    options.map(([v, label]) => h("option", v === value ? { value: v, selected: "" } : { value: v }, label)),
+  );
+  select.addEventListener("change", () => onSelect(select.value));
+  return select;
+}
+
+function filterTree(tree: readonly TreeRow[], state: NowState): TreeRow[] {
+  if (state.harness === "" && state.project === "") return [...tree];
+  const keep = new Set<number>();
+  for (let i = 0; i < tree.length; i++) {
+    const r = tree[i] as TreeRow;
+    const matchesHarness = state.harness === "" || r.harness === state.harness;
+    const matchesProject = state.project === "" || f.repository(r.project) === state.project;
+    if (!matchesHarness || !matchesProject) continue;
+    keep.add(i);
+    let targetDepth = r.depth - 1;
+    for (let j = i - 1; j >= 0 && targetDepth >= 0; j--) {
+      const prev = tree[j] as TreeRow;
+      if (prev.depth === targetDepth) {
+        keep.add(j);
+        targetDepth--;
+      }
+    }
+  }
+  return tree.filter((_, i) => keep.has(i));
 }
 
 /** The title, else the project folder or short session ID, indented under the session that started it (TREE-1, ADR 0016). */

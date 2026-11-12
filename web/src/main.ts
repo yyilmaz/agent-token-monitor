@@ -5,7 +5,7 @@ import { ConfigErrors, getJson } from "./data.js";
 import { h, table } from "./dom.js";
 import { sweepCharts } from "./chart.js";
 import { renderCache } from "./views/cache.js";
-import { renderDiagnostics, renderNow } from "./views/now.js";
+import { renderDiagnostics, renderNow, type NowState } from "./views/now.js";
 import { renderSession } from "./views/session.js";
 import { renderUsage, type UsageState } from "./views/usage.js";
 
@@ -21,7 +21,10 @@ interface Response {
   readonly configuration: { readonly ui: { readonly pollIntervalSeconds: number } };
 }
 
-const state: { usage: UsageState } = { usage: { range: 0, where: "harness", chartModes: {} } };
+const state: { now: NowState; usage: UsageState } = {
+  now: { harness: "", project: "" },
+  usage: { range: 0, where: "harness", harness: "", project: "", chartModes: {} },
+};
 let timer: number | undefined;
 let generation = 0;
 
@@ -64,7 +67,10 @@ async function load(): Promise<Response> {
     }
     default: {
       const data = await getJson<ReturnType<typeof api.overview>>("/api/overview");
-      show(renderNow(data));
+      show(renderNow(data, state.now, (next) => {
+        state.now = next;
+        void refresh();
+      }));
       return data;
     }
   }

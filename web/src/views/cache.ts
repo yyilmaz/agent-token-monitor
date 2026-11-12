@@ -46,8 +46,8 @@ function lifetimeCard(g: LifetimeGroup): HTMLElement {
       "div",
       {},
       g.gone === 0
-        ? h("span", { class: "badge good" }, `never lost after ${f.tokens(pauses)} pauses`)
-        : h("span", { class: "badge" }, `kept after ${percent(g.survived, pauses)} of ${f.tokens(pauses)} pauses`),
+        ? h("span", { class: "badge good" }, `never lost after ${f.tokens(pauses)} ${f.plural(pauses, "pause")}`)
+        : h("span", { class: "badge" }, `kept after ${percent(g.survived, pauses)} of ${f.tokens(pauses)} ${f.plural(pauses, "pause")}`),
     ),
     h(
       "div",
