@@ -2,7 +2,7 @@
 // Fixed English templates filled with the figures (R-04, R-11). Token load: the product cannot measure lost detail.
 
 import type { AdviceOption, ContextState, OptionLoad, SessionAdvice, WorkflowProfile } from "../../src/core/analysis/advice.js";
-import { disclosure, h, sessionLink } from "./dom.js";
+import { h, sessionLink } from "./dom.js";
 import * as f from "./format.js";
 
 const TAG: Readonly<Record<AdviceOption, readonly [string, string]>> = {
@@ -47,36 +47,43 @@ function workflowSubtitle(w: WorkflowProfile): string {
   return parts.join(" · ");
 }
 
-/** The badge for a session; falls back to WORKFLOW-1 when weighted token advice is unknown, and expandable details one level deeper. */
-export function adviceTag(a: SessionAdvice | null | undefined): HTMLElement {
-  if (a === null || a === undefined) return h("span", { class: "muted" }, "");
+/** Whether this advice entry has expandable WORKFLOW-1 or ADVICE-1 details. */
+export function hasAdviceDetails(a: SessionAdvice): boolean {
+  return a.advice !== null || a.workflow.contextState !== null;
+}
+
+/** The status badge for a session's ADVICE-1 or WORKFLOW-1 recommendation. */
+export function adviceBadge(a: SessionAdvice): HTMLElement | null {
   if (a.advice === null) {
-    if (a.workflow.contextState !== null) {
-      const [wText, wTone] = WORKFLOW_TAG[a.workflow.contextState];
-      return h(
-        "div",
-        { class: "advice-wrap" },
-        h(
-          "span",
-          {
-            class: `badge ${wTone}`,
-            title: `WORKFLOW-1 · ${workflowSentence(a.workflow)}`,
-          },
-          wText,
-        ),
-        h("div", { class: "muted small mt-1" }, workflowSubtitle(a.workflow)),
-        adviceDetails(a),
-      );
-    }
-    return h("span", { class: "muted", title: `ADVICE-1 · no advice: ${UNKNOWN[a.unknownReason ?? "contextUnknown"]}` }, "—");
+    if (a.workflow.contextState === null) return null;
+    const [wText, wTone] = WORKFLOW_TAG[a.workflow.contextState];
+    return h("span", { class: `badge ${wTone}`, title: `WORKFLOW-1 · ${workflowSentence(a.workflow)}` }, wText);
   }
   const [text, tone] = TAG[a.advice];
+  return h("span", { class: `badge ${tone}`, title: `ADVICE-1 · ${adviceSentence(a)} ${TOKEN_LOAD_NOTE}` }, text);
+}
+
+/** The badge and one-line summary for a session, with a compact "Why?" trigger that opens the detail drawer (ADR 0017). */
+export function adviceTag(a: SessionAdvice | null | undefined, onWhy?: (advice: SessionAdvice) => void): HTMLElement {
+  if (a === null || a === undefined) return h("span", { class: "muted" }, "");
+  const badge = adviceBadge(a);
+  if (badge === null) {
+    return h("span", { class: "muted", title: `ADVICE-1 · no advice: ${UNKNOWN[a.unknownReason ?? "contextUnknown"]}` }, "—");
+  }
+  const whyBtn =
+    onWhy !== undefined && hasAdviceDetails(a)
+      ? (() => {
+          const btn = h("button", { type: "button", class: "btn btn-sm col-toggle advice-why-btn" }, "Why?");
+          btn.addEventListener("click", () => onWhy(a));
+          return btn;
+        })()
+      : null;
+
   return h(
     "div",
     { class: "advice-wrap" },
-    h("span", { class: `badge ${tone}`, title: `ADVICE-1 · ${adviceSentence(a)} ${TOKEN_LOAD_NOTE}` }, text),
-    h("div", { class: "muted small mt-1" }, workflowSubtitle(a.workflow)),
-    adviceDetails(a),
+    h("div", { class: "d-flex flex-wrap align-items-center gap-2" }, badge, whyBtn),
+    h("div", { class: "muted small mt-1 advice-summary" }, workflowSubtitle(a.workflow)),
   );
 }
 
@@ -111,8 +118,8 @@ export function adviceSentence(a: SessionAdvice): string {
     `Compacting uses ${f.compactTokens(compact.total)} units and a fresh session uses ${f.compactTokens(fresh.total)} units.`;
 }
 
-/** The figures behind the advice, one level deeper (R-17, R-63). */
-export function adviceDetails(a: SessionAdvice): HTMLElement | null {
+/** The figures behind the advice, rendered inside the detail drawer (R-17, R-63). */
+export function adviceDetailsNodes(a: SessionAdvice, onNavigate?: () => void): HTMLElement[] {
   const w = a.workflow;
   const workflowNote = h(
     "p",
@@ -122,17 +129,18 @@ export function adviceDetails(a: SessionAdvice): HTMLElement | null {
       (w.subagentCount > 0 ? `, subagents used ${f.compactTokens(w.subagentTokens)} tokens.` : "."),
   );
   if (a.advice === null) {
-    if (w.contextState === null) return null;
-    return disclosure(
-      "Why?",
+    if (w.contextState === null) return [];
+    return [
       workflowNote,
-      h("p", { class: "muted small" }, `Weighted token comparison (ADVICE-1) unavailable: ${UNKNOWN[a.unknownReason ?? "contextUnknown"]}.`),
-    );
+      h("p", { class: "muted small mb-0" }, `Weighted token comparison (ADVICE-1) unavailable: ${UNKNOWN[a.unknownReason ?? "contextUnknown"]}.`),
+    ];
   }
   const name: Readonly<Record<AdviceOption, string>> = { keepGoing: "Keep going", compact: "Compact", startFresh: "New session" };
   const { freshStart, postCompaction, summary, remaining } = a.figures;
-  return disclosure(
-    "Why?",
+  const evidenceLink = sessionLink(a.sessionId, "Session evidence");
+  if (onNavigate !== undefined) evidenceLink.addEventListener("click", onNavigate);
+
+  return [
     workflowNote,
     h(
       "p",
@@ -145,10 +153,10 @@ export function adviceDetails(a: SessionAdvice): HTMLElement | null {
     ),
     h(
       "div",
-      { class: "table-responsive table-card", tabindex: "0" },
+      { class: "table-responsive table-card mb-3", tabindex: "0" },
       h(
         "table",
-        { class: "table table-sm align-middle text-nowrap small" },
+        { class: "table table-sm align-middle text-nowrap small mb-0" },
         h("thead", {}, h("tr", {}, ["Option", "Initial units", "Units per message", `Units over ${a.horizonMessages} messages`, "Break-even"].map((t) => h("th", { scope: "col" }, t)))),
         h(
           "tbody",
@@ -169,8 +177,8 @@ export function adviceDetails(a: SessionAdvice): HTMLElement | null {
     ),
     h("p", { class: "muted small" },
       `ADVICE-1 weights: cache read ×${a.weights.cacheRead}, cache write ×${a.weights.cacheWrite}, output ×${a.weights.output}. `,
-      sessionLink(a.sessionId, "Session evidence"),
+      evidenceLink,
     ),
-    h("p", { class: "muted small" }, TOKEN_LOAD_NOTE),
-  );
+    h("p", { class: "muted small mb-0" }, TOKEN_LOAD_NOTE),
+  ];
 }

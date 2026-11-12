@@ -1,10 +1,11 @@
 // View 1, "Now": open sessions (R-33, ADR 0013).
 
+import type { SessionAdvice } from "../../../src/core/analysis/advice.js";
 import type { OpenSession, TreeRow } from "../../../src/core/analysis/live.js";
 import type { diagnostics, overview } from "../../../src/core/api/index.js";
 import type { Diagnostic } from "../../../src/core/model/index.js";
-import { adviceTag } from "../advice.js";
-import { h, sessionLink, table } from "../dom.js";
+import { adviceBadge, adviceDetailsNodes, adviceTag } from "../advice.js";
+import { h, sessionLink, svg, table } from "../dom.js";
 import * as f from "../format.js";
 
 type Overview = ReturnType<typeof overview>;
@@ -22,10 +23,101 @@ const STATUS: Readonly<Record<OpenSession["cacheStatus"], [string, string]>> = {
   missedOnLastCall: ["missed on last call", "bad"],
 };
 
+type SessionLoad = Overview["sessionLoads"][string];
+
+let openAdviceSessionId: string | null = null;
+
+function sessionDisplayName(r: TreeRow): string {
+  const isSubagent = r.relation === "subagent";
+  return r.title ?? (r.project !== null ? f.project(r.project) : f.shortSessionId(r.sessionId, isSubagent));
+}
+
+function ensureAdviceDrawer(): {
+  dialog: HTMLDialogElement;
+  title: HTMLElement;
+  badgeSlot: HTMLElement;
+  body: HTMLElement;
+} {
+  const existing = document.getElementById("advice-drawer");
+  if (existing instanceof HTMLDialogElement) {
+    return {
+      dialog: existing,
+      title: existing.querySelector<HTMLElement>("#advice-drawer-title")!,
+      badgeSlot: existing.querySelector<HTMLElement>(".advice-drawer-badge")!,
+      body: existing.querySelector<HTMLElement>(".drawer-body")!,
+    };
+  }
+  const title = h("h3", { id: "advice-drawer-title", class: "m-0 fs-6 fw-semibold" }, "Advice");
+  const badgeSlot = h("span", { class: "advice-drawer-badge" });
+  const closeBtn = h(
+    "button",
+    { type: "button", class: "btn-icon", "aria-label": "Close advice details" },
+    svg("svg", { width: 20, height: 20, viewBox: "0 0 20 20", "aria-hidden": "true", fill: "none", stroke: "currentColor", "stroke-width": 1.5 },
+      svg("path", { d: "m5 5 10 10M15 5 5 15" })),
+  );
+  const body = h("div", { class: "drawer-body" });
+  const dialog = h(
+    "dialog",
+    {
+      id: "advice-drawer",
+      class: "drawer drawer-end advice-drawer",
+      closedby: "any",
+      "aria-labelledby": "advice-drawer-title",
+    },
+    h(
+      "div",
+      { class: "drawer-header d-flex align-items-start justify-content-between gap-3" },
+      h("div", { class: "d-flex flex-column gap-1 min-w-0" }, title, badgeSlot),
+      closeBtn,
+    ),
+    body,
+  );
+  closeBtn.addEventListener("click", () => dialog.close());
+  dialog.addEventListener("close", () => {
+    openAdviceSessionId = null;
+  });
+  // Fallback for browsers without <dialog closedby="any"> support (e.g., Safari).
+  if (!("closedBy" in HTMLDialogElement.prototype)) {
+    dialog.addEventListener("click", (event) => {
+      if (event.target !== dialog) return;
+      const rect = dialog.getBoundingClientRect();
+      const inside = rect.top <= event.clientY && event.clientY <= rect.top + rect.height && rect.left <= event.clientX && event.clientX <= rect.left + rect.width;
+      if (!inside) dialog.close();
+    });
+  }
+  document.body.append(dialog);
+  return { dialog, title, badgeSlot, body };
+}
+
+function populateAdviceDrawer(advice: SessionAdvice, row: TreeRow | undefined): void {
+  const { dialog, title, badgeSlot, body } = ensureAdviceDrawer();
+  title.textContent = row === undefined ? f.shortSessionId(advice.sessionId, false) : sessionDisplayName(row);
+  const badge = adviceBadge(advice);
+  badgeSlot.replaceChildren(...(badge === null ? [] : [badge]));
+  body.replaceChildren(...adviceDetailsNodes(advice, () => dialog.close()));
+}
+
 export function renderNow(data: Overview, state: NowState, onChange: (next: NowState) => void): HTMLElement {
   const adviceById = new Map(data.sessionAdvice.map((a) => [a.sessionId, a]));
+  const rowById = new Map(data.sessionTree.map((r) => [r.sessionId, r]));
   const rows = filterTree(data.sessionTree, state);
   const filters = nowFilters(data.sessionTree, state, onChange);
+
+  if (openAdviceSessionId !== null) {
+    const existingDialog = document.getElementById("advice-drawer");
+    if (existingDialog instanceof HTMLDialogElement && existingDialog.open) {
+      const currentAdvice = adviceById.get(openAdviceSessionId);
+      if (currentAdvice !== undefined) populateAdviceDrawer(currentAdvice, rowById.get(openAdviceSessionId));
+      else existingDialog.close();
+    }
+  }
+
+  const openAdviceDrawer = (advice: SessionAdvice) => {
+    openAdviceSessionId = advice.sessionId;
+    populateAdviceDrawer(advice, rowById.get(advice.sessionId));
+    const { dialog } = ensureAdviceDrawer();
+    if (!dialog.open) dialog.showModal();
+  };
 
   return h(
     "div",
@@ -33,40 +125,12 @@ export function renderNow(data: Overview, state: NowState, onChange: (next: NowS
     h("div", { class: "d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3" }, h("h2", { class: "m-0" }, "Open sessions"), filters),
     table(
       [
-        { title: "Session", cell: (r: TreeRow) => sessionCell(r) },
-        { title: "Harness", cell: (r) => f.harness(r.harness) },
-        {
-          title: "Model",
-          cell: (r) => {
-            if (r.open !== null) return f.model(r.open.model, r.open.modelSource);
-            const adv = adviceById.get(r.sessionId);
-            return adv !== undefined && adv.model !== null ? f.model(adv.model, adv.modelSource) : "";
-          },
-        },
+        { title: "Session", cell: (r: TreeRow) => sessionCell(r, adviceById.get(r.sessionId)) },
         {
           title: "Context",
+          help: "Current context size and recent 5-step weighted average load per step (and active window average since last compaction).",
           numeric: true,
-          cell: (r) => {
-            const ctx = r.open !== null ? r.open.contextTokens : (adviceById.get(r.sessionId)?.contextTokens ?? null);
-            return ctx === null ? "" : h("span", { title: `${f.tokens(ctx)} tokens` }, f.compactTokens(ctx));
-          },
-        },
-        {
-          title: "Step load (avg)",
-          help: "Recent 5-step weighted average load per step (and active window average since last compaction).",
-          numeric: true,
-          cell: (r) => {
-            const load = data.sessionLoads[r.sessionId];
-            if (load === undefined || load.recentAvgWeightedTokens === null) return "—";
-            return h(
-              "span",
-              {
-                class: "badge step-load-value",
-                title: `Recent avg: ${f.tokens(load.recentAvgWeightedTokens)} / step · Active window avg: ${f.tokens(load.activeWindowAvgWeightedTokens)} / step (${load.activeTurns} steps)`,
-              },
-              `${f.compactTokens(load.recentAvgWeightedTokens)}/step`,
-            );
-          },
+          cell: (r) => contextCell(r, adviceById.get(r.sessionId), data.sessionLoads[r.sessionId]),
         },
         {
           title: "Total weighted",
@@ -88,18 +152,9 @@ export function renderNow(data: Overview, state: NowState, onChange: (next: NowS
             );
           },
         },
-        { title: "Since last call", numeric: true, cell: (r) => (r.open === null ? "" : f.duration(r.open.secondsSinceLastCall)) },
-        {
-          title: "Cache",
-          cell: (r) => {
-            if (r.open === null) return h("span", { class: "badge", title: "TREE-1 · no call of its own within the open window; a session under it is active" }, "waiting");
-            const s = r.open;
-            const [text, tone] = STATUS[s.cacheStatus];
-            return h("span", { class: `badge ${tone}`, title: `LIVE-1 · reference lifetime ${f.duration(s.referenceLifetimeSeconds)} (${s.referenceSource})` }, text);
-          },
-        },
-        // ADR 0017: keep going, compact now or start fresh; the reason in weighted token units on hover.
-        { title: "Advice", cell: (r) => adviceTag(adviceById.get(r.sessionId)) },
+        { title: "Cache", cell: (r) => cacheCell(r) },
+        // ADR 0017: keep going, compact now or start fresh; detailed breakdown opens in the drawer.
+        { title: "Advice", cell: (r) => adviceTag(adviceById.get(r.sessionId), openAdviceDrawer) },
       ],
       rows,
       state.harness || state.project
@@ -171,20 +226,76 @@ function filterTree(tree: readonly TreeRow[], state: NowState): TreeRow[] {
   return tree.filter((_, i) => keep.has(i));
 }
 
-/** The title, else the project folder or short session ID, indented under the session that started it (TREE-1, ADR 0016). */
-function sessionCell(r: TreeRow): HTMLElement {
+/** The title, else the project folder or short session ID, with harness and model metadata underneath (TREE-1, ADR 0016). */
+function sessionCell(r: TreeRow, adv: SessionAdvice | undefined): HTMLElement {
   const isSubagent = r.relation === "subagent";
   const hasName = r.title !== null || r.project !== null;
-  const name = r.title ?? (r.project !== null ? f.project(r.project) : f.shortSessionId(r.sessionId, isSubagent));
+  const name = sessionDisplayName(r);
+  const modelText =
+    r.open !== null
+      ? f.model(r.open.model, r.open.modelSource)
+      : adv !== undefined && adv.model !== null
+        ? f.model(adv.model, adv.modelSource)
+        : "";
+  const metaParts = [
+    r.title !== null && r.project !== null ? f.project(r.project) : "",
+    f.harness(r.harness),
+    modelText,
+  ].filter((part) => part !== "");
+
   return h(
-    "span",
-    { class: "tree", "data-depth": String(Math.min(r.depth, 6)) },
-    r.depth > 0 ? h("span", { class: "muted" }, "↳ ") : null,
-    sessionLink(r.sessionId, name),
-    r.relation === "root" || (!hasName && isSubagent)
-      ? null
-      : h("span", { class: "muted small" }, isSubagent ? " · subagent" : " · side session"),
-    r.title === null || r.project === null ? null : h("div", { class: "muted small" }, f.project(r.project)),
+    "div",
+    { class: "tree session-cell", "data-depth": String(Math.min(r.depth, 6)) },
+    h(
+      "div",
+      { class: "session-title-line" },
+      r.depth > 0 ? h("span", { class: "muted" }, "↳ ") : null,
+      sessionLink(r.sessionId, name),
+      r.relation === "root" || (!hasName && isSubagent)
+        ? null
+        : h("span", { class: "muted small" }, isSubagent ? " · subagent" : " · side session"),
+    ),
+    metaParts.length === 0 ? null : h("div", { class: "muted small session-meta" }, metaParts.join(" · ")),
+  );
+}
+
+function contextCell(r: TreeRow, adv: SessionAdvice | undefined, load: SessionLoad | undefined): HTMLElement {
+  const ctx = r.open !== null ? r.open.contextTokens : (adv?.contextTokens ?? null);
+  const stepLoad =
+    load !== undefined && load.recentAvgWeightedTokens !== null
+      ? h(
+          "div",
+          { class: "mt-1" },
+          h(
+            "span",
+            {
+              class: "badge step-load-value",
+              title: `Recent avg: ${f.tokens(load.recentAvgWeightedTokens)} / step · Active window avg: ${f.tokens(load.activeWindowAvgWeightedTokens)} / step (${load.activeTurns} steps)`,
+            },
+            `${f.compactTokens(load.recentAvgWeightedTokens)}/step`,
+          ),
+        )
+      : null;
+
+  return h(
+    "div",
+    { class: "context-cell" },
+    ctx === null ? h("span", { class: "muted" }, "—") : h("span", { title: `${f.tokens(ctx)} tokens` }, f.compactTokens(ctx)),
+    stepLoad,
+  );
+}
+
+function cacheCell(r: TreeRow): HTMLElement {
+  if (r.open === null) {
+    return h("span", { class: "badge", title: "TREE-1 · no call of its own within the open window; a session under it is active" }, "waiting");
+  }
+  const s = r.open;
+  const [text, tone] = STATUS[s.cacheStatus];
+  return h(
+    "div",
+    { class: "cache-cell" },
+    h("span", { class: `badge ${tone}`, title: `LIVE-1 · reference lifetime ${f.duration(s.referenceLifetimeSeconds)} (${s.referenceSource})` }, text),
+    h("div", { class: "muted small mt-1", title: "Time since last call" }, `${f.duration(s.secondsSinceLastCall)} ago`),
   );
 }
 

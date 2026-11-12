@@ -106,7 +106,11 @@ export function table<R>(
   const container = h("div", {});
 
   const hidden = tableId === undefined ? new Set<string>() : getHiddenSet(tableId, columns);
-  const tablePanel = h("div", { class: "table-responsive table-card", tabindex: "0" });
+  const tablePanel = h("div", {
+    class: tableId === undefined ? "table-responsive table-card" : `table-responsive table-card table-${tableId}`,
+    role: "region",
+    tabindex: "0",
+  });
 
   const renderRows = () => {
     const activeCols = columns.filter((c) => !hidden.has(c.title));
@@ -145,7 +149,7 @@ export function table<R>(
             return h(
               "tr",
               cls === null ? {} : { class: cls },
-              activeCols.map((c) => h("td", c.numeric ? { class: "num" } : {}, c.cell(row))),
+              activeCols.map((c) => h("td", c.numeric ? { class: "num", "data-label": c.title } : { "data-label": c.title }, c.cell(row))),
             );
           }),
         ),
