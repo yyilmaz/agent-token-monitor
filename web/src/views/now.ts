@@ -1,9 +1,9 @@
 // View 1, "Now": open sessions (R-33, ADR 0013).
 
 import type { SessionAdvice } from "../../../src/core/analysis/advice.js";
+import type { DiagnosticGroup } from "../../../src/core/analysis/diagnostics.js";
 import type { OpenSession, TreeRow } from "../../../src/core/analysis/live.js";
 import type { diagnostics, overview } from "../../../src/core/api/index.js";
-import type { Diagnostic } from "../../../src/core/model/index.js";
 import { adviceBadge, adviceDetailsNodes, adviceTag } from "../advice.js";
 import { h, sessionLink, svg, table } from "../dom.js";
 import * as f from "../format.js";
@@ -299,17 +299,51 @@ function cacheCell(r: TreeRow): HTMLElement {
   );
 }
 
+/** R-23: problems grouped by kind, most serious and most frequent first, with what each does to the figures. */
 export function renderDiagnostics(data: ReturnType<typeof diagnostics>): HTMLElement {
-  return table(
-    [
-      { title: "Harness", cell: (d: Diagnostic) => f.harness(d.harness) },
-      { title: "Severity", cell: (d) => d.severity },
-      { title: "Code", cell: (d) => d.code },
-      { title: "Message", cell: (d) => d.message },
-      { title: "Where", cell: (d) => d.sources.map((s) => `${s.file}:${s.line}`).join(", ") },
-    ],
-    data.diagnostics,
-    "Every log line was read.",
+  const { errors, warnings, files } = data.summary;
+  const summary =
+    errors + warnings === 0
+      ? null
+      : h(
+          "p",
+          { class: "muted" },
+          `${errors} ${f.plural(errors, "error")}, ${warnings} ${f.plural(warnings, "warning")} in ${files} ${f.plural(files, "log file")}.`,
+        );
+  return h(
+    "div",
+    {},
+    summary,
+    table(
+      [
+        {
+          title: "Problem",
+          cell: (g: DiagnosticGroup) =>
+            h(
+              "div",
+              { class: "wrap" },
+              h("span", { class: `badge ${g.severity === "error" ? "bad" : "warn"} me-2` }, g.severity),
+              h("span", { class: "fw-semibold" }, g.title),
+              g.effect === null ? null : h("div", { class: "muted small" }, g.effect),
+              h("div", { class: "muted small" }, g.message, " ", h("code", {}, g.code)),
+            ),
+        },
+        { title: "Harness", cell: (g) => f.harness(g.harness) },
+        { title: "Count", numeric: true, cell: (g) => String(g.count) },
+        { title: "Files", numeric: true, cell: (g) => String(g.files) },
+        {
+          title: "Where",
+          cell: (g) =>
+            h(
+              "details",
+              {},
+              h("summary", {}, `${g.locations.length} of ${g.count}`),
+              g.locations.map((s) => h("div", { class: "small" }, `${s.file}:${s.line}`)),
+            ),
+        },
+      ],
+      data.groups,
+      "Every log line was read.",
+    ),
   );
 }
-

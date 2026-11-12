@@ -405,3 +405,4 @@ progress.share.series-4::-moz-progress-bar { background: var(--series-4); }
 .traj-inspector { --bs-card-bg: var(--chip); }
 .traj-inspector-grid { font-variant-numeric: tabular-nums; }
 tr.flash-row td { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); transition: background 0.3s; }
+.wrap { white-space: normal; }

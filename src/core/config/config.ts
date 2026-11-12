@@ -51,6 +51,8 @@ export const configSchema = object({
     usageRangesDays: array(integer(1), { minItems: 1, strictlyAscending: true }),
     // ADR 0016: rows a session's subagent table shows before "Show more".
     subagentRowsShown: integer(1),
+    // ADR 0013: log locations the Diagnostics view lists per group before the rest are only counted (R-23).
+    diagnosticLocationsShown: integer(1),
   }),
 });
 

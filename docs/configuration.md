@@ -125,4 +125,5 @@ Session advice ([ADR 0017](adr/0017-session-advice.md), R-60, R-62, R-63). Conte
 | `pollIntervalSeconds` | seconds | `5` | integer ≥ 1 | How often the dashboard asks for fresh data (R-32, [ADR 0005](adr/0005-frontend-single-page-typescript.md)) |
 | `usageRangesDays` | days | `[7, 30]` | integers ≥ 1, strictly ascending, at least one | The Usage summary always offers **Today** and adds these ranges. A value of `1` uses the **Today** option. Each range is compared with the same number of days before it (R-33) |
 | `subagentRowsShown` | rows | `10` | integer ≥ 1 | How many subagent rows a session's table shows before **Show more**, newest first ([ADR 0016](adr/0016-session-titles-and-tree.md)) |
+| `diagnosticLocationsShown` | locations | `5` | integer ≥ 1 | How many log locations (`file:line`) each group in the Diagnostics view lists; the group's count says how many exist (R-23, [ADR 0013](adr/0013-server-data-api-and-dashboard.md)) |
 

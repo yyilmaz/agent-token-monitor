@@ -60,9 +60,13 @@ All responses are JSON with sorted keys (ADR 0007) and carry `asOf`, `timeZone` 
 | `GET /api/usage?by=day\|month\|session` | `USE-1` totals | when the view is open |
 | `GET /api/cache` | lifetime groups, declared lifetimes per model and miss-cause totals (ADR 0009) | when the view is open |
 | `GET /api/sessions/<id>` | one session: its calls in order with tokens, cache class, loss, cause and source lines | when opened |
-| `GET /api/diagnostics` | all adapter diagnostics | when opened |
+| `GET /api/diagnostics` | adapter diagnostics grouped by harness, severity, code and message, with a summary (`errors`, `warnings`, `files`) | when opened |
 
 The page polls only the endpoint of the view on screen, every `ui.pollIntervalSeconds`. Each successful response carries the error and warning total (`diagnosticCount`) for the navbar link (R-23).
+
+### Diagnostics view
+
+R-23 needs unreadable logs to be visible, and a flat list of thousands of lines is not. `GET /api/diagnostics` therefore returns **groups**: one per harness, severity, code and message, with the count, the number of distinct log files and the first `ui.diagnosticLocationsShown` locations in file order. Each group carries a fixed plain-language title and the effect on the figures, from one table of code explanations in the core; a code without an entry shows the code itself. Groups sort errors first, then by count, then by harness, code and message (R-10). The view shows the summary above the groups and expands locations on demand. No log content is ever included (R-18).
 
 ### Dashboard views
 

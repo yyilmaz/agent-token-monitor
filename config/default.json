@@ -58,6 +58,7 @@
   "ui": {
     "pollIntervalSeconds": 5,
     "usageRangesDays": [7, 30],
-    "subagentRowsShown": 10
+    "subagentRowsShown": 10,
+    "diagnosticLocationsShown": 5
   }
 }

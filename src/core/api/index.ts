@@ -7,6 +7,7 @@ import { claudeCodeCapabilities } from "../adapters/claude-code/index.js";
 import { codexCapabilities } from "../adapters/codex/index.js";
 import { callWeightedTokens, sessionAdvice, sessionWeightedSummary, type SessionWeightedSummary, tokenWeightsOf } from "../analysis/advice.js";
 import { analyzeCache, type CacheAnalysis, type MissCauseKind, type ModelSource } from "../analysis/cache.js";
+import { groupDiagnostics } from "../analysis/diagnostics.js";
 import { openSessions, sessionTree } from "../analysis/live.js";
 import { dayIn, type UsageCall, usageCalls, type UsagePeriodKind, usageTotals } from "../analysis/usage.js";
 import type { Config, ConfigError } from "../config/config.js";
@@ -191,7 +192,7 @@ export function session(analysis: Analysis, asOf: EpochMillis, sessionId: string
 }
 
 export function diagnostics(analysis: Analysis, asOf: EpochMillis) {
-  return { ...envelope(analysis, asOf), diagnostics: analysis.data.diagnostics };
+  return { ...envelope(analysis, asOf), ...groupDiagnostics(analysis.data.diagnostics, analysis.config.ui.diagnosticLocationsShown) };
 }
 
 /** Titles of the linked sessions a session view names, so links read as names. */
