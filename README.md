@@ -1,14 +1,50 @@
 # agent-token-monitor
 
-**See exactly where your AI coding agent's tokens go: live, per session, per day, per month. Computed deterministically from the logs already on your disk.**
+**See exactly where your AI coding agent's tokens go — live, per session, per day, per month. Computed deterministically from the logs already on your disk.**
 
-> Status: early development. The Antigravity, Claude Code and Codex adapters, the cache analysis, session advice and a local dashboard (`Now`, `Usage`, `Cache`) are in place; report export and the OpenCode adapter are planned. [docs/SRS.md](docs/SRS.md) defines the product requirements. Technical decisions are recorded in [docs/adr/](docs/adr/).
+[![CI](https://github.com/yyilmaz/agent-token-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/yyilmaz/agent-token-monitor/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node.js >= 22.12](https://img.shields.io/badge/node-%3E%3D22.12-brightgreen.svg)](package.json)
+
+[Quick start](#quick-start) · [Dashboard tour](#dashboard-tour) · [Supported harnesses](#supported-harnesses) · [How analysis works](#how-analysis-works) · [Configuration](docs/configuration.md) · [Contributing](#contributing)
+
+<p align="center">
+  <img src="docs/images/dashboard-now.png" alt="agent-token-monitor Now view showing open sessions across Antigravity, Claude Code, and Codex" width="880" />
+</p>
+<p align="center">
+  <em>Local dashboard (<code>Now</code> view, rendered from synthetic fixture logs — no real user data).</em>
+</p>
+
+---
+
+## Why this exists
+
+An AI coding agent can silently re-read an entire long session after its prompt cache expires. Compaction adds a summarization request and may force the agent to re-read files. Raw token totals alone never tell you which of those happened.
+
+**agent-token-monitor makes it visible.** Without spending a single extra token or sending anything over the network, it answers:
+
+1. **Right now:** Which sessions are open, how large their context is, whether their cache is warm or probably cold, and whether to keep going, compact, or start fresh.
+2. **Over time:** How many tokens you used today, over 7 days, and over 30 days — split by harness, model, and project.
+3. **Why tokens spiked:** Which session, which step, and which cause (`idleBeyondLifetime`, `compaction`, `modelSwitch`, or `prematureLoss`) triggered a cache loss.
+
+---
+
+## Core principles
+
+| Principle | What it means |
+|---|---|
+| **Deterministic** | Same log files in, same numbers out, every time. No LLM calls, no sampling, no heuristics that drift between runs. Every number traces back to a log line. |
+| **Zero tokens** | Analysis never calls a model. Watching your usage consumes zero tokens. |
+| **Local-only, no secrets** | Reads local log files only. **No API keys, no credentials, no network calls, no telemetry.** Nothing leaves `127.0.0.1`. |
+| **Exact or explicitly `unknown`** | If a log omits a field (such as Antigravity's model name or hidden `/compact` tokens), the UI shows `unknown`. It never estimates or interpolates. |
+| **Read-only** | Pure observer. Never creates, modifies, locks, or deletes any harness file or setting. |
+| **Harness-agnostic** | One normalized data model; each harness is a small, swappable adapter. |
 
 ---
 
 ## Quick start
 
-Requires macOS and Node.js 22.12 or newer. There is no package to install: clone the repository and run it.
+**Requirements:** macOS (default log paths) and **Node.js 22.12+**. There is no package to install — clone and run locally:
 
 ```bash
 git clone https://github.com/yyilmaz/agent-token-monitor.git
@@ -17,119 +53,143 @@ npm ci
 npm start
 ```
 
-`npm start` builds the project and serves the dashboard on `http://127.0.0.1:4317`. Nothing is written to your harness directories and nothing leaves your machine. For another port, a custom log location or a JSON overview without the server, see [Contributing](#contributing) and [docs/configuration.md](docs/configuration.md).
+`npm start` compiles TypeScript and serves the dashboard at **`http://127.0.0.1:4317`**.
+
+### CLI & configuration options
+
+| Command / Flag | Description |
+|---|---|
+| `npm start` | Build and serve the dashboard on `http://127.0.0.1:4317` |
+| `node dist/src/hosts/node/main.js --port 8080` | Serve on a custom port (use `--port 0` for an OS-assigned free port) |
+| `node dist/src/hosts/node/main.js --config <path>` | Load a custom user configuration file |
+| `npm run build && npm run status` | Print the current JSON overview (`Now` + `ADVICE-1` + `WORKFLOW-1`) to stdout and exit |
+
+The server binds to `127.0.0.1` only and rejects requests with any other `Host` header ([ADR 0013](docs/adr/0013-server-data-api-and-dashboard.md)). For custom log directories (including Linux/Windows paths), assumed models, or cache thresholds, see [docs/configuration.md](docs/configuration.md).
 
 ---
 
-## Why this exists
+## Dashboard tour
 
-A coding agent can re-read a long session after its prompt cache expires. Compaction adds a summarization request and may require the agent to re-read files. Token counts alone do not tell you which of these happened.
+The local HTML dashboard refreshes automatically, works completely offline, follows your system light/dark theme (with a navbar toggle), and remembers column visibility preferences in your browser ([ADR 0019](docs/adr/0019-bootstrap-navbar-and-color-modes.md)).
 
-**agent-token-monitor makes it visible.** It answers:
+### Now — Open sessions & live advice
 
-1. Which sessions are open right now, how big their context is, and whether their cache is probably cold.
-2. How many tokens I used today and this month, split by harness, model and project.
-3. Which session, which step and which cause (cold cache, `/compact`, model switch, random miss, oversized file read, subagent) used the most tokens.
+Lists sessions active within the configured window (`openWithinSeconds`, default 30 min) with nested subagents and side sessions, current context size, time since last call, cache status (`warm`, `probably cold`, `missed on last call`), deterministic session advice (**keep going**, **compact now**, or **start fresh** via `ADVICE-1`), and workflow split metrics (`WORKFLOW-1`, [ADR 0017](docs/adr/0017-session-advice.md)).
 
-## Core principles (non-negotiable)
+### Usage — Daily trends & breakdowns
 
-| Principle | What it means |
-|---|---|
-| **Deterministic** | Same log files in, same numbers out, every time. No LLM calls, no sampling, no heuristics that change between runs. Every number traces back to a specific log line. |
-| **Zero tokens** | Analysis never calls a model. Watching your usage consumes no model tokens. |
-| **Local-only, no secrets** | Reads local log files only. **No API keys, no tokens, no credentials, no network calls, no telemetry.** Nothing leaves your machine. The repository must never contain or ask for a key. |
-| **Exact or explicitly unknown** | If a log does not record a value (e.g. the hidden `/compact` summarization call in Antigravity), the tool shows it as `unknown`. It never estimates, interpolates or makes up a number. |
-| **Read-only** | A pure observer. Never creates, changes, moves, locks or deletes any harness file or setting. It only reads. |
-| **Harness-agnostic** | One normalized data model; each harness is a small, swappable adapter. |
-| **Open source** | Built to be forked, audited and extended by adding adapters. |
+<p align="center">
+  <img src="docs/images/dashboard-usage.png" alt="agent-token-monitor Usage view showing daily token charts and per-harness breakdown" width="820" />
+</p>
 
-## Out of scope
+Totals and daily bar charts for **Today**, **Last 7 days**, and **Last 30 days**, with per-harness and combined views for input, output, and weighted token units, plus breakdowns by harness, model, or project.
 
-- **Quota display.** The dashboard shows token counts. The Codex adapter preserves logged quota samples and their sources in the normalized data.
-- Changing agent behavior, auto-running `/compact`, or any control over the harness. This is an observer, not a controller.
-- Reading message content beyond what is needed for classification. The dashboard and local API can show session titles, subagent descriptions, and project paths. Review screenshots and JSON output before sharing them.
+### Cache — Observed lifetimes & miss causes
 
-## Supported harnesses (adapters)
+<p align="center">
+  <img src="docs/images/dashboard-cache.png" alt="agent-token-monitor Cache view showing observed cache lifetimes and gap bands" width="820" />
+</p>
 
-Each adapter converts its harness's native log format into the shared model below. Initial targets, with the formats observed so far:
+Compares promised vs. observed cache lifetimes per harness and model, shows survived vs. lost counts across pause-duration bands, and attributes lost tokens to each deterministic miss cause.
 
-| Harness | Log location (macOS default) | Per-call fields available | Notes |
+### Session drill-down — Step-by-step timeline
+
+<p align="center">
+  <img src="docs/images/dashboard-session.png" alt="agent-token-monitor Session drill-down view showing step load trend, cache savings, and timeline" width="820" />
+</p>
+
+Inspects any session step by step: context growth, cache hit share, compaction boundaries, cache-savings summary, every cache miss with its cause, and the subagent tree.
+
+---
+
+## Supported harnesses
+
+Each adapter normalizes a harness's native logs into a single shared model and is pinned by anonymized fixture tests.
+
+| Harness | Status | Default log location (macOS) | Key notes |
 |---|---|---|---|
-| **Antigravity** (2.0 app) | `~/.gemini/antigravity/brain/<conversation-id>/.system_generated/logs/transcript.jsonl`, titles in `~/.gemini/antigravity/annotations/<conversation-id>.pbtxt` | `input_tokens` (uncached), `cache_read_tokens`, `output_tokens`, `created_at`, step type, tool calls | Each `PLANNER_RESPONSE` step is one request. There is no cache-write field: uncached prompt tokens are in `input_tokens`, so cache writes are recorded as `0`. The model name and thinking tokens are not logged → `unknown`. `/compact` writes a `CHECKPOINT` step with **no token counts** → shown as `unknown`. Subagents are separate conversations, linked by `.system_generated/subagents/<child-id>.json` in the parent. Other Antigravity products may write to other directories; add them to `logRoots.antigravity`. |
-| **Claude Code** | `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`, subagents in `<session-id>/subagents/agent-<id>.jsonl` | `message.usage`: `input_tokens`, `cache_creation_input_tokens` (5m / 1h split), `cache_read_input_tokens`, `output_tokens`, `thinking_tokens` | One request is written as several lines sharing a `requestId`; the adapter counts it once. Forked sessions copy earlier requests; they are counted once too. Compaction (`compact_boundary`) does not log the tokens of its summarization request → `unknown`. |
-| **Codex** | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `input_tokens` (**includes** cached), `cached_input_tokens`, `cache_write_input_tokens`, `output_tokens`, `reasoning_output_tokens` | Counts each `token_usage_record` once and supports older `token_count` snapshots. Logged rate limits are retained as quota samples in the normalized data. See [ADR 0018](docs/adr/0018-codex-adapter.md). |
-| **OpenCode** | `~/.local/share/opencode/opencode.db` (SQLite, with `-wal` and `-shm` files) | not examined yet | Sessions live in a SQLite database, not in JSONL files. Opening it normally can create or change the `-wal` / `-shm` files next to it, which R-15 forbids, so the adapter must read it strictly read-only (or from a copy outside the harness directory). Its ADR decides how. |
+| **Antigravity** (2.0 app) | Supported | `~/.gemini/antigravity/brain/<id>/.system_generated/logs/transcript.jsonl` | Titles from `annotations/<id>.pbtxt`; model & `/compact` tokens are `unknown` |
+| **Claude Code** | Supported | `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl` | Deduplicates streamed `requestId` lines and forked sessions; tracks 5m/1h cache writes |
+| **Codex** | Supported | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | Normalizes `input_tokens` (which includes cached tokens); retains logged quota samples |
+| **OpenCode** | Planned | `~/.local/share/opencode/opencode.db` | SQLite store; requires strictly read-only access without touching `-wal`/`-shm` (R-15) |
 
-> [!IMPORTANT]
-> Field semantics differ between harnesses. For example, Codex's `input_tokens` includes cached tokens, while Antigravity's and Claude Code's do not. Adapters must normalize these explicitly, and every adapter ships with fixture-based tests that pin the conversion.
+<details>
+<summary>Adapter normalization details &amp; per-call field semantics</summary>
 
-## Normalized data model
+Field semantics differ significantly between harnesses. Adapters normalize these differences explicitly:
 
-Every adapter emits the same records:
+- **Antigravity:** Each `PLANNER_RESPONSE` step is one request. `input_tokens` represents uncached prompt tokens, and there is no cache-write field, so cache writes are recorded as `0`. Model name and thinking tokens are not logged (`unknown`). `/compact` writes a `CHECKPOINT` step with no token counts (`unknown`). Subagents are separate conversations linked by `.system_generated/subagents/<child-id>.json`. Other Antigravity log directories can be added via `logRoots.antigravity`.
+- **Claude Code:** One request is written across multiple streaming lines sharing a `requestId`; the adapter counts it once (taking the largest output). `input_tokens` already excludes cached tokens. `cache_creation_input_tokens` splits 5m (`300s`) and 1h (`3600s`) ephemeral writes. Subagents live under `<session-id>/subagents/agent-<id>.jsonl`. Compaction (`compact_boundary`) does not log its summarization tokens (`unknown`).
+- **Codex:** Counts each `token_usage_record` once and supports older `token_count` snapshots ([ADR 0018](docs/adr/0018-codex-adapter.md)). Codex's `input_tokens` **includes** cached tokens, so the adapter subtracts `cached_input_tokens` and `cache_write_input_tokens` to compute `input_uncached`. Logged rate limits are preserved as quota samples.
+- **OpenCode:** Currently checks for the presence of `opencode.db` only and never opens it, because opening SQLite normally can create or modify `-wal` / `-shm` sidecar files in the harness directory, which violates the read-only rule (R-15).
 
-- **Session:** harness, session id, parent session (for subagents), project / working directory, model(s), first and last activity.
-- **Call** (one model invocation): timestamp, session, model, `input_uncached`, `cache_read`, `cache_write`, `output`, `reasoning` (each `int` or `unknown`), the tools it called, and a context size of `input_uncached + cache_read + cache_write`.
+</details>
+
+---
+
+## How analysis works
+
+### Normalized data model
+
+Every adapter emits the same core record types:
+- **Session:** harness, session ID, parent session (for subagents), project / working directory, model(s), first and last activity.
+- **Call:** timestamp, session, model, `input_uncached`, `cache_read`, `cache_write`, `output`, `reasoning` (each `int` or `unknown`), tool calls, and context size (`input_uncached + cache_read + cache_write`).
 - **Event:** compaction, model switch, user turn, subagent spawn, error.
-- **Quota sample** (only where logged): source, window, used percent, reset time.
+- **Quota sample** *(where logged)*: source, window, used percent, reset time.
 
-## Weighted token units
+### Weighted token units
 
-Weighted token units estimate relative processing load. One uncached input token is the reference unit. For each call, the default calculation is:
+Weighted token units estimate relative processing load using `1` uncached input token as the reference unit:
 
 ```text
 round(uncached input × 1 + cache read × 0.1 + cache write × 1.25 + output × 5)
 ```
 
-For example, 100 uncached input tokens, 500 cache-read tokens, 20 cache-write tokens, and 20 output tokens add up to **275 weighted token units**. Each call is rounded before its units are summed into session load. If some of the four counts are missing, only the known counts contribute. If all four are missing, the call's weighted load is unknown. Reasoning has no separate term in the formula.
+For example, `100` uncached input + `500` cache read + `20` cache write + `20` output = **275 weighted token units**. Missing fields are omitted from the sum; if all four are missing, the call's weighted load is `unknown`. Weights are configurable under `rules.sessionAdvice.weights` ([docs/configuration.md](docs/configuration.md#rules), [ADR 0017](docs/adr/0017-session-advice.md)).
 
-The weights are configurable under `rules.sessionAdvice.weights`. Session advice uses the same weights to estimate future load. [Configuration](docs/configuration.md#rules) · [ADR 0017](docs/adr/0017-session-advice.md)
+### Deterministic cache-miss classification
 
-## Deterministic cache-miss classification
+A call is a **full cache miss** when it reads `0` from cache above `fullMissMinContextTokens`. It is a **cache loss** when it is a full miss or reads less than `survivedMinCacheReadShare` of the previous context from cache. Each cache loss receives exactly one cause from ordered rules over the log alone ([ADR 0009](docs/adr/0009-cache-classification-lifetime-and-miss-causes.md)):
 
-A call counts as a **full cache miss** when it read nothing from the cache and its context is above a configurable threshold. It counts as a **cache loss** when it is a full miss, or when it read only a small share of the previous context from the cache: every session starts with the same system prompt and tool definitions, which other sessions keep cached, so a session whose own cache expired still reads that shared beginning. Each cache loss gets exactly one cause, decided by ordered rules over the log alone ([ADR 0009](docs/adr/0009-cache-classification-lifetime-and-miss-causes.md)):
+1. `modelSwitch` — the model changed since the previous call in the session.
+2. `compaction` — a compaction occurred since the previous call.
+3. `idleBeyondLifetime` — the pause since the previous call exceeds the declared (or observed) cache lifetime.
+4. `prematureLoss` — any other loss, including unexpected mid-session expirations.
 
-1. `modelSwitch`: the model changed since the previous call in the session.
-2. `compaction`: a compaction happened since the previous call.
-3. `idleBeyondLifetime`: the gap since the previous call exceeds the cache lifetime (declared by the harness, otherwise observed).
-4. `prematureLoss`: everything else, including the "cache lost within seconds" case.
+---
 
-## Dashboard views (local HTML dashboard)
+## Roadmap & out of scope
 
-A single local web page that refreshes itself every few seconds and works offline.
-The dashboard uses Bootstrap 6 components and follows the system light or dark appearance by default. The button at the right of the navbar switches themes and remembers the choice in the browser. On narrow screens, the navigation opens as a drawer and wide tables scroll within their panels ([ADR 0019](docs/adr/0019-bootstrap-navbar-and-color-modes.md)).
-The navbar links to log diagnostics and shows the current error and warning count.
-Tables with configurable columns offer a **Columns** menu that remembers visibility choices in the browser.
+**Shipped:** Antigravity, Claude Code, and Codex adapters · live `Now` view with `ADVICE-1` & `WORKFLOW-1` · `Usage` & `Cache` views · session drill-down · `--status` JSON CLI · diagnostics.
 
-- **Now:** open sessions (activity within N minutes) by their titles, with side sessions and subagents under the session that started them, current context size, time since last call, and cache status (`warm` / `probably cold` / `missed on last call`). Each open session also gets one piece of advice, **keep going**, **compact now** or **start fresh**, from comparing their estimated weighted token load over the messages you usually still send (`ADVICE-1`), alongside a deterministic workflow and subagent split profile (`WORKFLOW-1`: `compactActive`, `activeWorkingSet`, `explorationHeavy`, `coldLargeContext`, and `splitBreakEvenSteps`) ([ADR 0017](docs/adr/0017-session-advice.md)).
-- **Usage:** totals and daily charts for the selected date range. The input, output and weighted load charts each support per-harness and combined totals. The usage breakdown can be grouped by harness, model or project.
-- **Cache:** observed and declared lifetimes, survived and gone counts by gap band, and tokens lost to each miss cause.
-- **Session drill-down:** a step-by-step token timeline, context growth, every cache miss with its cause, and the subagent tree.
+**Planned:**
+- OpenCode strictly read-only SQLite adapter (R-21)
+- Self-contained HTML report export (R-71, [ADR 0002](docs/adr/0002-architecture-and-boundaries.md))
+- Native VS Code extension host packaging (R-26)
 
-Self-contained HTML report export is planned (SRS R-71, ADR 0002).
+**Intentionally out of scope:**
+- **Controlling agents:** This is a pure observer. It never modifies settings, triggers `/compact`, or alters agent behavior.
+- **Quota dashboards:** The dashboard focuses on token counts (though the Codex adapter preserves logged quota samples in the normalized model).
+- **Reading prompt/code content:** Only metadata needed for classification is read. Session titles, subagent descriptions, and project paths may appear in the local UI/API — review screenshots or JSON output before sharing.
 
-## Open decisions
-
-Open questions are tracked in [SRS section 4](docs/SRS.md#4-open-questions); technical decisions are tracked in the [ADR index](docs/adr/README.md).
+---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and [SECURITY.md](SECURITY.md) for reporting vulnerabilities. New harness support starts with an adapter, a few anonymized fixture log files and tests that pin the normalization.
-
-Run the following commands from the repository root. The standalone dashboard supports macOS and requires Node.js 22.12 or newer. For other platforms or custom log locations, set the paths in your [user configuration](docs/configuration.md).
+Contributions are welcome — especially new harness adapters with anonymized log fixtures and unit tests. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
 
 ```bash
-npm ci          # install the locked development tools
-npm test        # builds with tsc, then runs node --test
-npm start       # builds, then serves the dashboard on 127.0.0.1:4317 and prints its URL
-npm run status  # prints the current overview JSON (Now + ADVICE-1 + WORKFLOW-1) to stdout and exits
+npm ci      # install locked dev dependencies
+npm test    # compile with tsc and run node --test
 ```
 
-GitHub CI runs the build and tests on macOS with the minimum supported Node.js version. It audits the npm lockfile and fails on high or critical advisories. Gitleaks scans the checked-out Git history on pull requests and pushes to `main`, with detected secret values redacted in CI logs (R-13). Dependabot checks npm packages and GitHub Actions weekly. The vendored Bootstrap and uPlot files are maintained separately from the npm lockfile.
+**Architecture & docs:**
+- [docs/SRS.md](docs/SRS.md) — product requirements and open questions
+- [docs/adr/](docs/adr/README.md) — Architecture Decision Records (including [project layout](docs/adr/0006-project-layout-and-tooling.md))
+- [docs/configuration.md](docs/configuration.md) — full configuration schema
 
-`npm start` serves on port 4317; for another port (or `--port 0`, a free port chosen by the operating system) run `npm run build && node dist/src/hosts/node/main.js --port 8080`; `--config <path>` selects a user configuration file; `--status` prints the JSON overview and exits without starting the HTTP server. The server reads the logs read-only, writes nothing to disk and answers only requests addressed to `127.0.0.1` or `localhost` ([ADR 0013](docs/adr/0013-server-data-api-and-dashboard.md)).
-
-Layout and boundaries are described in [ADR 0006](docs/adr/0006-project-layout-and-tooling.md); configuration keys in [docs/configuration.md](docs/configuration.md).
+GitHub Actions CI runs `npm test` on macOS with Node.js 22.12, audits the npm lockfile, and runs Gitleaks on PRs and pushes to `main`.
 
 ## License
 
-[MIT License](LICENSE)
+[MIT](LICENSE)
