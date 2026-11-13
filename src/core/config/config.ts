@@ -5,7 +5,7 @@ import { array, HARNESS_KEYS, integer, object, optional, perHarness, rate, recor
 import { validate, type ValidationError } from "./validate.js";
 
 /** Version of the configuration schema. Bumped when keys change incompatibly. */
-export const CONFIG_SCHEMA_VERSION = 2;
+export const CONFIG_SCHEMA_VERSION = 3;
 
 export const configSchema = object({
   schemaVersion: integer(1),
@@ -33,8 +33,8 @@ export const configSchema = object({
     freshSession: object({ minSessions: integer(1) }),
     sessionAdvice: object({
       minCompactions: integer(1),
-      minSessions: integer(1),
-      contextBandEdgesTokens: array(integer(1), { minItems: 1, strictlyAscending: true }),
+      minUserTurns: integer(1),
+      leanContextTokens: integer(1),
       recentTurnsWindow: optional(integer(1)),
       weights: optional(
         object({

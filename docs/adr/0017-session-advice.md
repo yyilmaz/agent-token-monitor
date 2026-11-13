@@ -1,39 +1,78 @@
 # 0017. Session advice: keep going, compact or start fresh
 
 - Status: Accepted
-- Date: 2026-11-09
-- Requirements: R-10, R-11, R-16, R-17, R-22, R-30, R-51, R-60, R-62, R-63, R-72
+- Date: 2026-11-13
+- Requirements: R-10, R-11, R-16, R-17, R-18, R-22, R-30, R-51, R-60, R-62, R-63, R-72
 
 ## Context
 
-An open session can continue, compact its history into a summary, or start fresh. Compaction processes the current context and produces summary tokens, then later calls process the smaller context. A new session starts from its own baseline. R-60 requires an expected token saving based on the user's history, and R-51 limits the comparison to token units.
+An open session can continue, compact its history into a summary, or start fresh. Compaction processes the current context and produces summary tokens, then later calls process the smaller context. A new session first writes its own baseline context to the cache, then each step reads that smaller context. R-60 requires concrete advice with an expected token saving based on the user's history, and R-51 limits the comparison to token units.
 
-Claude Code logs what this needs. Each `compact_boundary` line carries `compactMetadata` with `trigger` (`manual` or `auto`), `preTokens` (context before) and `postTokens` (summary size), next to the session's calls before and after it. Antigravity logs a `CHECKPOINT` step without token counts.
+Whether a change pays off depends on how long the work after it lasts: a fresh session costs more up front and less per step, so it pays back only after enough steps. The product cannot know what the user will ask next or how long it will take; the user does. The advice must therefore:
+
+- state the condition under which a change pays back (*"a new task of 2+ messages"*), so the user decides with what they know;
+- answer two questions separately: *for a new task* (keep going against a fresh session) and *to continue the current task* (keep going against compacting), because only a new task can drop the current context;
+- speak only when the condition is realistic for this user's work, and stay quiet otherwise;
+- produce exactly one verdict per session from one rule, so a safety condition (a running subagent) can never be hidden behind a token comparison;
+- still compare a fresh session when a harness logs no compaction figures (Codex, Antigravity);
+- classify steps from every harness, including steps that read or edit files through a shell tool.
+
+Claude Code logs compaction figures: each `compact_boundary` line carries `compactMetadata` with `trigger` (`manual` or `auto`), `preTokens` (context before) and `postTokens` (summary size). Antigravity logs a `CHECKPOINT` step without token counts. Codex logs a `compacted` entry without token counts. All three adapters emit `userTurn` Events (ADR 0008).
 
 ## Decision
 
-All rules are pure functions in `src/core/analysis/` over the normalized model (ADR 0008), the cache analysis (ADR 0009) and the configured token weights. They look only at sessions that are not subagents: the user drives those, so only they can act on the advice.
+All rules are pure functions in `src/core/analysis/` over the normalized model (ADR 0008), the cache analysis (ADR 0009) and the configured token weights. They give advice only for open top-level sessions (`LIVE-1`): the user drives those, so only they can act on it. Subagent rows carry no advice.
 
 ### Compaction figures in the data model
 
-**Rule `COMPACT-1` (adapter).** A compaction Event (ADR 0008) gains `compaction: { trigger, preTokens, postTokens } | null`. The Claude Code adapter fills it from `compactMetadata`; any field the line lacks is `null`, and an adapter whose harness logs none (Antigravity) sets `null` (R-16, R-22). Fixture tests pin the mapping.
+**Rule `COMPACT-1` (adapter).** A compaction Event (ADR 0008) carries `compaction: { trigger, preTokens, postTokens } | null`. The Claude Code adapter fills it from `compactMetadata`; any field the line lacks is `null`, and an adapter whose harness logs none (Antigravity, Codex) sets `null` (R-16, R-22). Fixture tests pin the mapping.
+
+### Step classes from tool calls
+
+**Rule `STEP-1` (adapter + analysis).** Every turn call gets a step class: `edit`, `explore` or `other`.
+
+- **Named tools.** Edit tools: `edit_file`, `write_file`, `replace_file_content`, `multi_replace_file_content`, `Edit`, `MultiEdit`, `Write`, `NotebookEdit`, `apply_patch`. Explore tools: `read_file`, `view_file`, `view_file_outline`, `view_code_item`, `grep`, `grep_search`, `find_by_name`, `list_dir`, `Read`, `Grep`, `Glob`, `LS`, `WebSearch`, `WebFetch`, `search_web`.
+- **Shell commands.** The adapter reads a shell command only to classify it, stores the class in `Call.shellClasses` (one entry per shell call, in call order) and keeps no command text (R-18).
+  - Outside quotes, the command is split into segments at `&&`, `||`, `;`, `|`, `&`, parentheses and newlines. A here-document body is skipped up to its delimiter line.
+  - Redirections are not words: output to a target (`>`, `>>`, `&>`) is recorded, `2>&1`-style descriptor copies and input redirections (`<`, `<<<`) are ignored.
+  - In each segment, leading environment assignments and an `env` prefix are skipped; the base name of the next word is the program.
+  - A segment is **neutral** and skipped when its program is `cd`, `pwd`, `echo`, `printf` or `true` (and it redirects nothing).
+  - A segment is **`edit`** when it redirects output to a target other than `/dev/null`, when its program is `apply_patch`, `tee`, `touch`, `mkdir`, `mv`, `cp` or `rm`, or when it is `sed` or `perl` with an in-place flag (`-i`, a flag group containing `i`, or `--in-place`).
+  - A segment is **`explore`** when its program is `cat`, `head`, `tail`, `sed`, `awk`, `grep`, `rg`, `ls`, `find`, `fd`, `tree`, `wc`, `file`, `stat` or `jq`, or `git` whose subcommand (after `-C`/`-c` options) is `status`, `log`, `diff`, `show` or `blame`. Any other segment is `other`.
+  - The shell call is `edit` when any segment is `edit`, `explore` when every non-neutral segment is `explore` (and there is at least one), otherwise `other`.
+- **Where each harness logs shell commands.**
+  - Claude Code: the `command` input of a `Bash` tool_use, counted once per tool_use id.
+  - Antigravity: `args.CommandLine` of a `run_command` call; the log stores it JSON-encoded, so a value in quotes is decoded first.
+  - Codex: the Codex adapter fills `toolNames` and `shellClasses` from the `function_call`, `custom_tool_call` and `local_shell_call` response items logged since the previous request (ADR 0018). The script tools `exec` (input) and `js` (`code` argument) contribute each nested `tools.<name>(…)` call; a nested `exec_command` is classified from its literal `cmd` string, else `other`. The tools `shell`, `exec_command` and `local_shell` are classified from `cmd` or `command` (an argv `["bash", "-lc", script]` runs its script).
+- **Turn class.** A turn call is `edit` when any of its tool calls is `edit`. Otherwise it is `explore` when any is `explore`. Otherwise it is `other`.
+
+The program lists are code, pinned by tests, like the named tool sets. Fixture tests with synthetic commands pin each harness's argument field.
 
 ### Figures from the user's own history
 
-Per harness and effective model (ADR 0009 `MODEL-1`), over the whole history. With an even count, each median takes the lower middle value. Below its minimum count each figure is `unknown`.
+Per harness and effective model (ADR 0009 `MODEL-1`), over the whole history, from top-level sessions only. With an even count, each median takes the lower middle value. Below its minimum count each figure is `unknown`.
 
-- **`FRESH-1`, typical start of a new session:** the median context size (`inputUncached + cacheRead + cacheWrite`) of the first turn call of every session that is not a subagent. At least `rules.freshSession.minSessions` sessions.
-- **`POSTCOMPACT-1`, context after compacting:** the median context size (`inputUncached + cacheRead + cacheWrite`) of the first turn call after each compaction Event in the same session. At least `rules.sessionAdvice.minCompactions` compactions.
+- **`FRESH-1`, typical start of a new session:** the median context size (`inputUncached + cacheRead + cacheWrite`) of the first turn call of every session. At least `rules.freshSession.minSessions` sessions.
+- **`TASK-1`, typical task length:** the median number of turn calls per session, over the same sessions as `FRESH-1` (so it is known exactly when `FRESH-1` is). A session stands for one task.
+- **`STEPS-1`, steps per message:** the median number of turn calls between one `userTurn` Event and the next `userTurn` Event (or the session's last call) in the same session. A user turn followed by no turn call is not counted. At least `rules.sessionAdvice.minUserTurns` user turns. It converts steps into the messages the user counts.
+- **`POSTCOMPACT-1`, context after compacting:** the median context size of the first turn call after each compaction Event in the same session. At least `rules.sessionAdvice.minCompactions` compactions.
 - **`SUMMARY-1`, summary size:** the median `postTokens` of those compactions. The summarization request itself is not logged (ADR 0008), so its output is taken to be the summary. This is a derived estimate, labeled as one.
-- **`REMAIN-1`, messages still to come:** for the context band (`rules.sessionAdvice.contextBandEdgesTokens`) of the session's current context, the median number of turn calls that sessions sent after their context first entered that band. At least `rules.sessionAdvice.minSessions` sessions.
 
-### Weighted token load of each option
+### One decision per session
 
-**Rule `ADVICE-1`.** For an open top-level session (`LIVE-1`), compare the three options using the existing `rules.sessionAdvice.weights`. The weights express relative token processing load, with one uncached input token as the default unit. Compare integer millionths before converting to display units so fractional weights preserve ties and break-even horizons. Each result uses the configured weights and is labeled **weighted token units**.
+**Rule `ADVICE-1`.** For each open top-level session, the first matching step decides the verdict:
 
-Let `C` be the current context, `P` the context after compaction, `S` the summary size, and `F` the fresh context. Let `r`, `w` and `o` be the configured cache-read, cache-write and output weights.
+1. **Wait.** One or more child subagents are active (open, warm cache, a call at or after the parent's last call). Verdict `wait`: the subagent will report back into this session, so the user should not leave it.
+2. **Unknown session.** The effective model or the current context `C` is unknown. Verdict `unknown`, naming the missing figure.
+3. **Lean.** `C < rules.sessionAdvice.leanContextTokens`. Verdict `lean` (keep going): the context is small, and losing it costs the user more than the tokens it saves.
+4. **Unknown history.** `FRESH-1`, `TASK-1` or `STEPS-1` is unknown. Verdict `unknown`, naming the missing figure.
+5. **Compare.** Otherwise verdict `compare`, with two cases:
+   - **For a new task:** keep going against a fresh session.
+   - **To continue this task:** keep going against compacting. When `POSTCOMPACT-1` or `SUMMARY-1` is unknown, this case keeps going and names the missing figure.
 
-| Option | Initial load | Load per later message |
+Let `C` be the current context, `P` the context after compaction, `S` the summary size and `F` the fresh context. Let `r`, `w` and `o` be the configured cache-read, cache-write and output weights from `rules.sessionAdvice.weights`.
+
+| Option | Initial load | Load per later step |
 |---|---|---|
 | Keep going, warm | 0 | `C × r` |
 | Keep going, cold | `C × w` | `C × r` |
@@ -41,60 +80,112 @@ Let `C` be the current context, `P` the context after compaction, `S` the summar
 | Compact, cold | `C × w + S × o + P × w` | `P × r` |
 | Start fresh | `F × w` | `F × r` |
 
-A session is cold when `LIVE-1` reports `probably cold` or `missed on last call`. The model treats later messages as cache reads and omits their common output load.
+A session is cold when `LIVE-1` reports `probably cold` or `missed on last call`. Later steps are treated as cache reads; their common output load is omitted. All arithmetic uses integer millionths of a weighted token unit, so fractional weights cannot change ties or break-even steps.
 
-Use `REMAIN-1` as the horizon `H`. An option's total is its initial load plus `H` times its load per later message. Choose the lowest total, with ties resolved in order: keep going, compact, start fresh. Expected saving is the difference between the keep-going total and the chosen total. For alternatives, report the first nonnegative whole-message horizon at which their total is no greater than the keep-going total. If an option starts above the keep-going total and has an equal or greater per-message load, it never breaks even. If a required historical figure is missing, report `unknown` and identify the missing figure.
+For each case:
 
-### Workflow profile and subagent split break-even
+- **Break-even steps:** the first nonnegative whole number of steps at which the alternative's load (initial plus steps × per step) is no greater than keeping going: `0` when its initial load is no greater, `never` when it starts higher and saves nothing per step, otherwise `ceil(initial gap ÷ per-step saving)`.
+- **Break-even messages:** `ceil(break-even steps ÷ STEPS-1)`.
+- **Totals over a typical task:** each option's initial load plus `TASK-1` times its per-step load. The saving is the keep-going total minus the alternative's total.
+- **Advice:** the alternative when its saving over a typical task is strictly positive, that is, it pays back within a typical task; otherwise keep going. A tie keeps going, the less disruptive option.
 
-**Rule `WORKFLOW-1`.** For every open top-level session, the analysis also computes its deterministic workflow profile from the session's active context window (turn calls after the session's latest `compaction` event, or all turn calls when the session has not been compacted) and subagents:
+### Workflow profile
 
-- `turns`: number of turn calls in the active context window (0 immediately after a compaction before the next turn).
-- `editTurns`: active-window turn calls that invoked at least one edit/write tool (`edit_file`, `write_file`, `replace_file_content`, `multi_replace_file_content`, `Edit`, `MultiEdit`, `Write`, `NotebookEdit`, `apply_patch`).
-- `exploreTurns`: active-window turn calls that invoked read/search tools (`read_file`, `view_file`, `view_file_outline`, `view_code_item`, `grep`, `grep_search`, `find_by_name`, `list_dir`, `Read`, `Grep`, `Glob`, `LS`, `WebSearch`, `WebFetch`, `search_web`) and no edit/write tool.
-- `firstContextTokens`: context size of the first turn call in the active context window (falling back to the session's first turn call when just compacted).
-- `baseContextTokens`: `FRESH-1` when known, else `firstContextTokens`.
-- `recentGrowthTokens`: context growth over up to the last 3 turn intervals in the active window (`context(last) − context(max(0, last − 3))`).
-- `subagentCount`, `activeSubagentCount` and `subagentTokens`: number of child subagent sessions, how many of them are currently open with a warm cache and a call at or after the parent's last call, and the sum of child subagent known tokens.
-- `splitBreakEvenSteps`: when the session is past the lean limit (`max(2 × baseContextTokens, contextBandEdgesTokens[0])`) and `contextTokens > baseContextTokens`, `floor(2 × contextTokens ÷ (contextTokens − baseContextTokens)) + 1`, the minimum number of steps `k` an independent subtask needs before delegating to a subagent (which costs 2 parent turns at `contextTokens` to spawn and receive the reply, plus `k` subagent turns at `baseContextTokens`: `2 × contextTokens + k × baseContextTokens < k × contextTokens`) processes fewer context tokens than continuing at `contextTokens`; otherwise `null`.
-- `contextState`:
-  - `waitingOnSubagents` when `activeSubagentCount > 0`: one or more child subagents are actively working and will return results to this session; stay in this session rather than starting fresh.
-  - `compactActive` immediately after a compaction (0 post-compaction turns) or when `contextTokens < max(2 × baseContextTokens, contextBandEdgesTokens[0])`: context is lean; splitting into a subagent wastes startup context.
-  - `coldLargeContext` when `contextTokens ≥ max(2 × baseContextTokens, contextBandEdgesTokens[0])` and the cache is cold: avoid cold compaction; start fresh if the next task is independent.
-  - `explorationHeavy` when `contextTokens ≥ max(2 × baseContextTokens, contextBandEdgesTokens[0])`, the cache is warm, `exploreTurns ≥ 3`, `exploreTurns > 2 × editTurns` and `exploreTurns × 2 ≥ turns`: context grew mainly from read/search steps without proportional edits; delegate independent multi-step subtasks (`≥ splitBreakEvenSteps` steps) to a subagent or compact at a phase boundary.
-  - `activeWorkingSet` otherwise (`contextTokens ≥ max(2 × baseContextTokens, contextBandEdgesTokens[0])`, warm): large active working set; keep same-module work in this session to reuse the warm cache, and delegate only noisy search or independent subtasks (`≥ splitBreakEvenSteps` steps).
+**Rule `WORKFLOW-1`.** Detail information only. It never sets the verdict or the badge. Over the session's active context window (turn calls after its latest compaction Event, or all turn calls), it reports:
+
+- `turns`, `editTurns`, `exploreTurns` and `otherTurns` by `STEP-1`;
+- `subagentCount`, `activeSubagentCount` and `subagentTokens`;
+- `splitBreakEvenSteps`: when `C ≥ leanContextTokens` and `C > F`, `floor(2 × C ÷ (C − F)) + 1`. This is the minimum number of steps an independent subtask needs before a subagent processes fewer context tokens than this session would (two parent turns at `C` to spawn and receive, plus `k` subagent turns at `F`: `2 × C + k × F < k × C`). Otherwise `null`;
+- an `explorationHeavy` hint when `C ≥ leanContextTokens`, `exploreTurns ≥ 3`, `exploreTurns > 2 × editTurns` and `exploreTurns × 2 ≥ turns`: the context grew mainly from read and search steps, so independent multi-step subtasks are better delegated.
 
 ### What the user sees
 
-The Now view shows one recommendation per open top-level session with expected weighted token savings, the horizon and the rule ID. Expandable details show the historical inputs, configured weights, all three totals and break-even points (R-17, R-63). The estimate compares token load. Context discarded by compaction or a fresh session can still matter to the user. The product never takes these actions itself (R-62).
+The Now view's Advice column shows the badge, one line with the break-even and the typical task length, and one line with the `WORKFLOW-1` profile. `N` is the break-even in messages.
+
+| Verdict | Badge |
+|---|---|
+| `wait` | **Wait** · N subagent(s) running |
+| `unknown` | **Unknown** · missing figure |
+| `lean` | **Keep going** · lean context |
+| new task → start fresh, `N ≤ 1` | **New task? Start fresh** |
+| new task → start fresh, `N ≥ 2` | **New task of N+ messages? Start fresh** |
+| same task → compact, `N ≤ 1` | **Same task? Compact** |
+| same task → compact, `N ≥ 2` | **Task goes on N+ messages? Compact** |
+| both cases keep going | **Keep going** |
+
+When both cases recommend a change, both badges are shown. The summary line reads, for example, *"fresh pays back after ~2 messages · typical task ~16 messages"*. The detail drawer shows the inputs (`C`, cache state, `F`, `TASK-1`, `STEPS-1`, `P`, `S`), every option's initial load, per-step load, total over a typical task, saving and break-even, the parameters and weights, the rule IDs and the `WORKFLOW-1` profile (R-17, R-63). The estimate compares token load only. The product never takes these actions itself (R-62).
 
 ### Parameters
 
 | Key | Default | Why |
 |---|---|---|
-| `rules.freshSession.minSessions` | 5 | a median of fewer sessions says little |
-| `rules.sessionAdvice.minCompactions` | 5 | a median of fewer compactions says little |
-| `rules.sessionAdvice.minSessions` | 5 | the same for messages still to come |
-| `rules.sessionAdvice.contextBandEdgesTokens` | `[50000, 100000, 200000, 500000]` | half-open context bands `[from, to)` for `REMAIN-1` and lean-context floor for `WORKFLOW-1` |
-| `rules.sessionAdvice.recentTurnsWindow` | `5` | recent turns averaged for current step load in `WORKFLOW-1` |
-| `rules.sessionAdvice.weights` | `{ cacheRead: 0.1, inputUncached: 1, cacheWrite: 1.25, output: 5 }` | token weights (`1` = `1` uncached input token) for advice and per-step, active-window, session and subagent weighted load |
+| `rules.freshSession.minSessions` | 5 | a median of fewer sessions says little (`FRESH-1`, `TASK-1`) |
+| `rules.sessionAdvice.minUserTurns` | 5 | the same for steps per message |
+| `rules.sessionAdvice.minCompactions` | 5 | the same for compaction figures |
+| `rules.sessionAdvice.leanContextTokens` | 50000 | below this, the context is worth more to the user than the tokens a change would save |
+| `rules.sessionAdvice.recentTurnsWindow` | 5 | recent turns averaged for the per-step load column |
+| `rules.sessionAdvice.weights` | `{ cacheRead: 0.1, inputUncached: 1, cacheWrite: 1.25, output: 5 }` | token weights (`1` = `1` uncached input token) for advice, step, session and subagent weighted load |
 
-There are no other thresholds: the advice comes from comparing three totals.
+### Acceptance scenarios
+
+Tests pin these cases with synthetic figures and the default weights and parameters. Claude Code: `F` = 80,000, `STEPS-1` = 5, `TASK-1` = 80 steps (16 messages), `P` = 95,000, `S` = 20,000. Antigravity: `F` = 20,000, `STEPS-1` = 8, `TASK-1` = 32, no compaction figures. Codex: `F` = 15,000, `STEPS-1` = 10, `TASK-1` = 40, no compaction figures. Break-even is given as steps (messages).
+
+| # | Harness | `C` | Cache | Subagents running | New task | Same task | Badge |
+|---|---|---|---|---|---|---|---|
+| A1 | Claude Code | 252,000 | warm | 1 | — | — | Wait · 1 subagent running |
+| A2 | Claude Code | 252,000 | warm | 0 | 6 (2) → start fresh | 10 (2) → compact | New task of 2+ messages? Start fresh · Task goes on 2+ messages? Compact |
+| A3 | Claude Code | 175,000 | warm | 0 | 11 (3) → start fresh | 18 (4) → compact | New task of 3+ messages? Start fresh · Task goes on 4+ messages? Compact |
+| A4 | Claude Code | 100,000 | warm | 0 | 50 (10) → start fresh | 270 (54) → keep | New task of 10+ messages? Start fresh |
+| A5 | Claude Code | 92,400 | warm | 0 | 81 (17) → keep | never → keep | Keep going |
+| A6 | Claude Code | 92,500 | warm | 0 | 80 (16), tie over a typical task → keep | never → keep | Keep going |
+| A7 | Claude Code | 92,600 | warm | 0 | 80 (16), saves 800 → start fresh | never → keep | New task of 16+ messages? Start fresh |
+| A8 | Claude Code | 60,000 | warm | 0 | never → keep | never → keep | Keep going |
+| A9 | Claude Code | 30,000 | warm | 0 | — | — | Keep going · lean context |
+| A10 | Claude Code (subagent row) | any | any | — | — | — | no advice |
+| B1 | Antigravity | 75,600 | warm | 0 | 5 (1) → start fresh | figures unknown → keep | New task? Start fresh |
+| B2 | Antigravity | 25,300 | cold | 0 | — | — | Keep going · lean context |
+| B3 | Antigravity | 135,900 | cold | 0 | 0 (0) → start fresh | figures unknown → keep | New task? Start fresh |
+| C1 | Codex | 246,400 | warm | 0 | 1 (1) → start fresh | figures unknown → keep | New task? Start fresh |
+| D1 | any | ≥ 50,000 | any | 0 | effective model unknown | — | Unknown · model |
+| D2 | any | ≥ 50,000 | any | 0 | fewer than 5 sessions for `FRESH-1` | — | Unknown · fresh start |
+| D3 | any | ≥ 50,000 | any | 0 | fewer than 5 user turns for `STEPS-1` | — | Unknown · steps per message |
+| D4 | any | any | any | 1 | `FRESH-1` unknown | — | Wait · 1 subagent running |
+| D5 | any | ≥ 50,000 | warm | 0 | all weights zero: break-even 0, saving 0 → keep | — | Keep going |
+
+`STEP-1` cases (more are pinned in `test/core/model/step.test.ts`):
+
+| # | Tool call | Class |
+|---|---|---|
+| S1 | `Bash`: `cd dir && rg pattern src \| head` | explore |
+| S2 | `Bash`: `cat > out.txt <<EOF …` | edit |
+| S3 | `Bash`: `grep pattern file.txt 2>/dev/null` | explore |
+| S4 | `Bash`: `sed -i s/a/b/ file.txt` | edit |
+| S5 | `Bash`: `npm test` | other |
+| S6 | Codex `exec` calling `tools.apply_patch(…)` | edit, and `toolNames` contains `apply_patch` |
+| S7 | Codex `exec_command` with `sed -n 1,5p file.txt` | explore |
+| S8 | turn with `Read` and a `Bash` edit | edit |
 
 ## Alternatives considered
 
-- **Use raw totals for advice.** Easier to explain, but treats cached reads, cache writes and summary output as equally expensive in processing terms. The configured weights already distinguish these categories in the session load view.
-- **Use a fixed message horizon.** Requires a user-supplied guess. `REMAIN-1` estimates it from the user's history.
-- **Use summary size as the post-compaction context.** Omits the system prompt and tools and overstates the expected saving.
+- **Pick the lowest of the three totals as one verdict.** Starting fresh nearly always has the lowest total, so the advice ignores whether the user still needs the context. Two cases (new task, same task) state the condition explicitly.
+- **A fixed horizon of one message.** A new task rarely ends after one message. With the user's real figures (fresh start ≈ 80,000 tokens, ≈ 5 steps per message) a fresh session never paid back within one message below ≈ 373,000 tokens, so the advice was always "keep going".
+- **Recommend when the saving over a horizon exceeds a fixed share.** Needs a guessed horizon and a guessed share, and says "saves 63%" instead of the condition the user can check. The break-even in messages states that condition directly, and `TASK-1` bounds it to the user's own work.
+- **Horizon from messages still to come in the current context band.** The median per context band jumps at each band edge, so the verdict flips between neighbouring context sizes.
+- **Separate workflow badges next to the token advice.** Two rule systems competing for one badge hid running subagents behind a token verdict. The workflow profile stays as detail only.
+- **Count shell steps as `other`.** Simpler and reads no arguments, but leaves Codex and shell-heavy Claude Code sessions at zero edit and explore steps, which makes the profile wrong.
+- **Fall back to the session's own first context when `FRESH-1` is unknown.** One sample can include a large first prompt and overstate the baseline. `unknown` with the missing figure named is more honest.
 
 ## VS Code compatibility
 
-- `COMPACT-1` is part of the Claude Code adapter; `FRESH-1`, `POSTCOMPACT-1`, `SUMMARY-1`, `REMAIN-1` and `ADVICE-1` are pure functions over the normalized model with no host access (ADR 0006), and run unchanged in the extension host.
+- `COMPACT-1` and the adapter part of `STEP-1` live in the adapters; `STEP-1` classification lives in `src/core/model/step.ts`; `FRESH-1`, `TASK-1`, `STEPS-1`, `POSTCOMPACT-1`, `SUMMARY-1`, `ADVICE-1` and `WORKFLOW-1` are pure functions over the normalized model with no host access (ADR 0006), and run unchanged in the extension host.
 - The advice travels in the overview payload as JSON token units. The Webview renders the same data as the browser.
 - The parameters live in the configuration file and validator (ADR 0007).
 
 ## Consequences
 
-- The expected saving is a weighted token estimate. Its inputs and units are visible in the dashboard.
-- `SUMMARY-1` estimates summary output from compaction metadata. When required figures are unavailable, the advice is unknown.
-- Usage reports raw token counts and separately labeled weighted token units. Advice reports weighted token units.
+- One rule decides each badge; a running subagent always shows as **Wait**.
+- The badge is conditional: it names the task length from which a change pays back, and the user decides with what they know about the next work.
+- A warm session's new-task advice appears once `C` is large enough for a fresh session to pay back within a typical task: `C > F + F × w ÷ (r × TASK-1)`. With the Claude Code scenario figures that is above 92,500 tokens (A6, A7).
+- Fresh-session advice works for every harness with enough history; compaction advice only where compaction figures are logged (Claude Code).
+- `STEP-1` reads shell command strings transiently to classify them; ADR 0008 allows this and stores only the class.
+- `SUMMARY-1` estimates summary output from compaction metadata. When required figures are unavailable, the affected case is reported with the missing figure named.

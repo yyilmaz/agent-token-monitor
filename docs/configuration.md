@@ -23,7 +23,7 @@ If no user file exists, the defaults apply. The tool never creates or rewrites i
 - **Merge:** objects merge key by key; arrays and single values replace the default as a whole.
 - **Unknown keys are errors.** A misspelled key is reported, never ignored.
 - `null` is not allowed.
-- `schemaVersion` must match the version the tool expects (currently `2`). There is no silent migration. For a version 1 user file, remove the `pricing` key if present and update an explicit `schemaVersion` to `2`.
+- `schemaVersion` must match the version the tool expects (currently `3`). There is no silent migration. For a version 2 user file, remove `rules.sessionAdvice.minSessions` and `rules.sessionAdvice.contextBandEdgesTokens` if present and update an explicit `schemaVersion` to `3`. For a version 1 file, also remove the `pricing` key.
 - On any error, the tool shows the file, the key path and the reason, and shows no analysis results.
 - A leading `~` in paths means your home directory.
 - The configuration in effect is shown in the dashboard and embedded in exported reports (R-10, R-71).
@@ -107,14 +107,14 @@ Antigravity does not log the model. If you always use the same one, set it here 
 
 ### `rules`
 
-Session advice ([ADR 0017](adr/0017-session-advice.md), R-60, R-62, R-63). Context bands are half-open, `[from, to)`; the first starts at `0` and the last is open.
+Session advice ([ADR 0017](adr/0017-session-advice.md), R-60, R-62, R-63). A change is recommended only when it pays back within the user's typical task (`TASK-1`), so there is no saving threshold to tune.
 
 | Key | Unit | Default | Allowed | Used by |
 |---|---|---|---|---|
-| `freshSession.minSessions` | count | `5` | integer ≥ 1 | `FRESH-1`: fewer top-level sessions leave the typical fresh start, and the advice built on it, `unknown` |
-| `sessionAdvice.minCompactions` | count | `5` | integer ≥ 1 | `POSTCOMPACT-1`, `SUMMARY-1` ([ADR 0017](adr/0017-session-advice.md)): fewer compactions make the figure, and the advice, unknown |
-| `sessionAdvice.minSessions` | count | `5` | integer ≥ 1 | `REMAIN-1` (ADR 0017): fewer sessions in a context band make the figure, and the advice, unknown |
-| `sessionAdvice.contextBandEdgesTokens` | tokens | `[50000, 100000, 200000, 500000]` | integers ≥ 1, strictly ascending, at least one | `REMAIN-1` and `WORKFLOW-1` (ADR 0017): context-size bands |
+| `freshSession.minSessions` | count | `5` | integer ≥ 1 | `FRESH-1` and `TASK-1`: fewer top-level sessions leave the typical fresh start and task length, and the advice built on them, `unknown` |
+| `sessionAdvice.minUserTurns` | count | `5` | integer ≥ 1 | `STEPS-1` ([ADR 0017](adr/0017-session-advice.md)): fewer user messages leave the steps per message, and the advice, `unknown` |
+| `sessionAdvice.minCompactions` | count | `5` | integer ≥ 1 | `POSTCOMPACT-1`, `SUMMARY-1` (ADR 0017): fewer compactions leave the compaction case `unknown`; the new-task case still runs |
+| `sessionAdvice.leanContextTokens` | tokens | `50000` | integer ≥ 1 | `ADVICE-1` and `WORKFLOW-1` (ADR 0017): below this context size the advice is "keep going" without a comparison |
 | `sessionAdvice.recentTurnsWindow` | count | `5` | integer ≥ 1 | `WORKFLOW-1` (ADR 0017): number of most recent turns used for the recent step load average |
 | `sessionAdvice.weights` | multiplier | `{ cacheRead: 0.1, inputUncached: 1, cacheWrite: 1.25, output: 5 }` | non-negative numbers | Token category weights (`1` = `1` uncached input token) for advice, step and session loads (ADR 0017), and weighted Usage totals (ADR 0013) |
 

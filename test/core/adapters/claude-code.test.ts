@@ -60,6 +60,7 @@ describe("Claude Code adapter", async () => {
       output: 5,
       reasoning: 3,
       toolNames: ["Read"],
+      shellClasses: [],
       // Lines copied into the forked session-b stay traceable, but the request is not counted twice.
       sources: [src(A, 2), src(A, 3), src(B, 2), src(B, 3)],
     });
@@ -70,6 +71,12 @@ describe("Claude Code adapter", async () => {
     assert.equal(req2.output, 25);
     assert.equal(req2.cacheRead, 30000);
     assert.deepEqual(req2.toolNames, ["Bash"]);
+  });
+
+  it("classifies each Bash call by STEP-1 and keeps only the class (R-18, ADR 0017)", () => {
+    const req2 = call("claudeCode:req-2");
+    assert.deepEqual(req2.shellClasses, ["explore", "edit"]);
+    assert.equal(JSON.stringify(req2).includes("pattern"), false);
   });
 
   it("maps input_tokens directly to inputUncached (it excludes cached tokens)", () => {
@@ -104,6 +111,7 @@ describe("Claude Code adapter", async () => {
       reasoning: null,
       cacheWriteByTtlSeconds: null,
       toolNames: [],
+      shellClasses: [],
       sources: [src(A, 8)],
     });
   });

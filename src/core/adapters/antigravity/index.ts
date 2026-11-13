@@ -24,10 +24,12 @@ import type {
   EventType,
   Session,
   SourceRef,
+  StepClass,
   TokenCount,
 } from "../../model/index.js";
 import type { LogFile } from "../../host/index.js";
 import { compareByTimeThenSource, compareSources, compareStrings } from "../../order.js";
+import { classifyShellCommand } from "../../model/step.js";
 import { type Diagnose, isObject, parseTimestamp } from "../shared.js";
 
 const HARNESS = "antigravity";
@@ -322,6 +324,7 @@ function readPlannerResponse(
     reasoning: null,
     cacheWriteByTtlSeconds: null,
     toolNames: toolNamesOf(step["tool_calls"]),
+    shellClasses: shellClassesOf(step["tool_calls"]),
     sources: [source],
   };
 }
@@ -340,6 +343,7 @@ function compactionCall(nativeKey: string, session: string, timestamp: number, s
     reasoning: null,
     cacheWriteByTtlSeconds: null,
     toolNames: [],
+    shellClasses: [],
     sources: [source],
   };
 }
@@ -383,6 +387,33 @@ function toolNamesOf(toolCalls: unknown): string[] {
     if (isObject(call) && typeof call["name"] === "string" && !names.includes(call["name"])) names.push(call["name"]);
   }
   return names;
+}
+
+/**
+ * STEP-1 (ADR 0017): classify each `run_command` call from `args.CommandLine`; the command is discarded (R-18).
+ * The log stores the command as a JSON-encoded string, so a value in quotes is decoded first.
+ */
+function shellClassesOf(toolCalls: unknown): StepClass[] {
+  if (!Array.isArray(toolCalls)) return [];
+  const classes: StepClass[] = [];
+  for (const call of toolCalls) {
+    if (!isObject(call) || call["name"] !== "run_command") continue;
+    const args = call["args"];
+    const raw = isObject(args) && typeof args["CommandLine"] === "string" ? args["CommandLine"] : null;
+    classes.push(raw === null ? "other" : classifyShellCommand(decodeQuoted(raw)));
+  }
+  return classes;
+}
+
+function decodeQuoted(value: string): string {
+  if (!value.startsWith("\"")) return value;
+  try {
+    const decoded: unknown = JSON.parse(value);
+    if (typeof decoded === "string") return decoded;
+  } catch {
+    // Not a complete JSON string: classify what follows the opening quote.
+  }
+  return value.slice(1);
 }
 
 function sessionId(nativeId: string): string {

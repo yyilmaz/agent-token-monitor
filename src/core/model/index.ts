@@ -55,8 +55,13 @@ export interface Call {
   /** Cache-write tokens keyed by lifetime in seconds (e.g. "300", "3600"), when the log splits them. */
   readonly cacheWriteByTtlSeconds: Readonly<Record<string, number>> | null;
   readonly toolNames: readonly string[];
+  /** STEP-1 (ADR 0017): the class of each shell tool call, in call order; the command text is not kept (R-18). */
+  readonly shellClasses: readonly StepClass[];
   readonly sources: readonly SourceRef[];
 }
+
+/** STEP-1 (ADR 0017): what a tool call or turn call did. */
+export type StepClass = "edit" | "explore" | "other";
 
 export type EventType = "userTurn" | "compaction" | "subagentSpawn" | "error";
 

@@ -48,6 +48,7 @@ function call(spec: CallSpec): Call {
     reasoning: null,
     cacheWriteByTtlSeconds: spec.ttl ?? null,
     toolNames: [],
+    shellClasses: [],
     sources: [{ logRoot: "r:0", file: "f", line }],
   };
 }

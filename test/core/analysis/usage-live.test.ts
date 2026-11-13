@@ -34,6 +34,7 @@ function call(id: string, sessionId: string, iso: string, spec: Partial<Call> = 
     reasoning: null,
     cacheWriteByTtlSeconds: null,
     toolNames: [],
+    shellClasses: [],
     sources: [{ logRoot: "r:0", file: "f", line }],
     ...spec,
   };

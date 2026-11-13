@@ -45,6 +45,25 @@ describe("Codex rollout adapter (ADR 0018)", () => {
     ]);
   });
 
+  it("fills tool names and STEP-1 shell classes from the tool calls before each request (ADR 0017, R-18)", () => {
+    // Kept outside the Codex fixture root so the server tests' file counts stay unchanged.
+    const text = readFileSync(new URL("../../../../test/fixtures/codex-tools/rollout-tools.jsonl", import.meta.url), "utf8");
+    const result = parseCodex([{ logRoot: "codex:0", file: "rollout-tools.jsonl", lines: text.split("\n") }]);
+    assert.deepEqual(result.calls.map((call) => [call.toolNames, call.shellClasses]), [
+      [["exec_command"], ["explore"]],
+      [["apply_patch", "exec_command"], ["explore"]],
+      [["exec_command", "local_shell", "sleep"], ["other", "explore"]],
+    ]);
+    assert.equal(JSON.stringify(result).includes("pattern"), false);
+    assert.deepEqual(result.diagnostics, []);
+  });
+
+  it("emits a user turn from task_started, once per turn when user_message follows (ADR 0017 STEPS-1)", () => {
+    const text = readFileSync(new URL("../../../../test/fixtures/codex-tools/rollout-tools.jsonl", import.meta.url), "utf8");
+    const result = parseCodex([{ logRoot: "codex:0", file: "rollout-tools.jsonl", lines: text.split("\n") }]);
+    assert.deepEqual(result.events.map((e) => [e.type, e.sources[0]?.line]), [["userTurn", 3], ["userTurn", 11]]);
+  });
+
   it("combines copied requests across roots and gives the same output as parsing the files (COD-2, COD-4)", () => {
     const copy = { ...mixed, logRoot: "codex:1" };
     const snapshotOnly = { ...mixed, logRoot: "codex:2", lines: mixed.lines.filter((_, index) => index !== 3) };

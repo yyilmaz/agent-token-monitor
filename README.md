@@ -74,7 +74,7 @@ The local HTML dashboard refreshes automatically, works completely offline, foll
 
 ### Now — Open sessions & live advice
 
-Lists sessions active within the configured window (`openWithinSeconds`, default 30 min) with nested subagents and side sessions, current context size, time since last call, cache status (`warm`, `probably cold`, `missed on last call`), deterministic session advice (**keep going**, **compact now**, or **start fresh** via `ADVICE-1`), and workflow split metrics (`WORKFLOW-1`, [ADR 0017](docs/adr/0017-session-advice.md)).
+Lists sessions active within the configured window (`openWithinSeconds`, default 30 min) with nested subagents and side sessions, current context size, time since last call, cache status (`warm`, `probably cold`, `missed on last call`), and deterministic session advice (`ADVICE-1`, [ADR 0017](docs/adr/0017-session-advice.md)). The advice says **Wait** while a subagent is still running, and otherwise names the task length from which a change pays back, from your own history: for example **New task of 2+ messages? Start fresh** or **Task goes on 4+ messages? Compact**. Below that it says **Keep going**. The Why? drawer shows every figure behind it and the session's workflow profile (`WORKFLOW-1`): edit, explore and other steps, including shell commands (`STEP-1`).
 
 ### Usage — Daily trends & breakdowns
 

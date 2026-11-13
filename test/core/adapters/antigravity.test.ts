@@ -63,6 +63,7 @@ describe("Antigravity adapter", async () => {
       reasoning: null,
       cacheWriteByTtlSeconds: null,
       toolNames: ["invoke_subagent"],
+      shellClasses: [],
       sources: [src(PARENT, 5)],
     });
   });
@@ -75,6 +76,10 @@ describe("Antigravity adapter", async () => {
   it("lists each tool name once, in first-use order", () => {
     assert.deepEqual(call("antigravity:conv-child:1").toolNames, ["run_command", "read_file"]);
     assert.equal(call("antigravity:conv-child:1").sessionId, "antigravity:conv-child");
+  });
+
+  it("classifies each run_command by STEP-1, decoding a JSON-quoted command line (R-18, ADR 0017)", () => {
+    assert.deepEqual(call("antigravity:conv-child:1").shellClasses, ["explore", "edit"]);
   });
 
   it("keeps every token field unknown for a planner step without token counts (R-16)", () => {
@@ -97,6 +102,7 @@ describe("Antigravity adapter", async () => {
       reasoning: null,
       cacheWriteByTtlSeconds: null,
       toolNames: [],
+      shellClasses: [],
       sources: [src(PARENT, 9)],
     });
   });

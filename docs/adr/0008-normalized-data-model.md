@@ -30,7 +30,7 @@ The model is defined as TypeScript types in `src/core/model/` (ADR 0006). Adapte
 5. **Every record carries its source** as `{ logRoot, file, line }`: the configured log root key, the file path relative to that root, and the 1-based line number. A record built from several lines lists all of them (R-17).
 6. **IDs are stable strings** built from harness data, never from random values or counters: `"<harness>:<native id>"`.
 7. **Canonical order:** sessions by `(harness, id)`; calls and events by `(timestamp, file, line)`. Adapters return records in this order, and analysis may rely on it (R-10).
-8. **No content:** no prompt text, model output, tool arguments, file paths read by tools, or file contents. Tool **names** are allowed because classification needs them (R-18).
+8. **No content:** no prompt text, model output, tool arguments, file paths read by tools, or file contents. Tool **names** are allowed because classification needs them (R-18). An adapter MAY read a shell tool's command while reading the line, only to classify it (ADR 0017 `STEP-1`); it stores the class, never the command.
 
 ### Records
 
@@ -46,6 +46,7 @@ The model is defined as TypeScript types in `src/core/model/` (ADR 0006). Adapte
 - `inputUncached`, `cacheRead`, `cacheWrite`, `output`, `reasoning`: each an integer or `null`
 - `cacheWriteByTtlSeconds`: an object such as `{ "300": 1200, "3600": 0 }` when the log splits writes by lifetime, otherwise `null`
 - `toolNames`: string array
+- `shellClasses`: the `STEP-1` class (`"edit"`, `"explore"` or `"other"`) of each shell tool call, in call order (ADR 0017)
 - `sources`
 
 `contextSize` is not stored. Analysis derives it as `inputUncached + cacheRead + cacheWrite` when all three are known, and `null` otherwise.

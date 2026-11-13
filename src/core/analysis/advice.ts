@@ -1,9 +1,12 @@
 // Session advice of ADR 0017: keep going, compact or start fresh (R-60, R-62).
-// FRESH-1, POSTCOMPACT-1, SUMMARY-1 and REMAIN-1 come from the user's own history; ADVICE-1 compares the three totals in
-// weighted token units (R-51). Pure functions over the normalized model; no thresholds besides minimum counts.
+// FRESH-1, TASK-1, STEPS-1, POSTCOMPACT-1 and SUMMARY-1 come from the user's own history. ADVICE-1 decides one verdict per
+// open top-level session: wait, unknown, lean, or a break-even comparison in weighted token units (R-51) for a new task
+// and for the same task, stated in messages. WORKFLOW-1 is detail only. Pure functions over the normalized model;
+// parameters come from the configuration (R-72).
 
 import type { Config } from "../config/config.js";
 import type { Call, EpochMillis, Event, HarnessId, Session } from "../model/index.js";
+import { turnStepClass } from "../model/step.js";
 import { compareStrings } from "../order.js";
 import { TOKEN_WEIGHT_SCALE } from "../config/schema.js";
 import type { CacheAnalysis, CallCacheResult, ModelSource } from "./cache.js";
@@ -26,6 +29,15 @@ export interface FreshStart extends Group {
   readonly minSessions: number;
 }
 
+/** TASK-1: how many turn calls a session usually takes, over the same sessions as FRESH-1. */
+export interface TypicalTask extends Group {
+  readonly rule: "TASK-1";
+  readonly sessions: number;
+  readonly minSessions: number;
+  /** Lower median of turn calls per session; null with fewer than `minSessions` sessions (R-16). */
+  readonly medianSteps: number | null;
+}
+
 /** POSTCOMPACT-1: context size of the first turn call after a compaction. */
 export interface PostCompaction extends Group {
   readonly rule: "POSTCOMPACT-1";
@@ -43,20 +55,16 @@ export interface SummarySize extends Group {
   readonly medianTokens: number | null;
 }
 
-/** REMAIN-1: turn calls a session usually sends after its context first enters a context band. */
-export interface RemainingMessages extends Group {
-  readonly rule: "REMAIN-1";
-  /** The band, from `rules.sessionAdvice.contextBandEdgesTokens`; `toTokens` null for the last, open band. */
-  readonly fromTokens: number;
-  readonly toTokens: number | null;
-  readonly sessions: number;
-  readonly minSessions: number;
-  readonly medianMessages: number | null;
+/** STEPS-1: turn calls a user request usually takes; converts break-even steps into messages. */
+export interface StepsPerRequest extends Group {
+  readonly rule: "STEPS-1";
+  readonly userTurns: number;
+  readonly minUserTurns: number;
+  /** Lower median; null with fewer than `minUserTurns` user turns (R-16). */
+  readonly medianSteps: number | null;
 }
 
 export type AdviceOption = "keepGoing" | "compact" | "startFresh";
-
-export type ContextState = "compactActive" | "activeWorkingSet" | "explorationHeavy" | "waitingOnSubagents" | "coldLargeContext";
 
 export interface TokenWeights {
   readonly cacheRead: number;
@@ -178,13 +186,17 @@ export function sessionWeightedSummary(
   };
 }
 
-/** WORKFLOW-1: deterministic context & subagent split profile for an open session (ADR 0017). */
+
+/** WORKFLOW-1: the session's working pattern, shown as detail only; it never sets the verdict (ADR 0017). */
 export interface WorkflowProfile {
   readonly rule: "WORKFLOW-1";
+  /** Turn calls in the active context window (after the latest compaction) and their STEP-1 classes. */
   readonly turns: number;
   readonly editTurns: number;
   readonly exploreTurns: number;
+  readonly otherTurns: number;
   readonly firstContextTokens: number | null;
+  /** FRESH-1 when known: the context a subagent or new session starts with. */
   readonly baseContextTokens: number | null;
   readonly recentGrowthTokens: number | null;
   readonly subagentCount: number;
@@ -192,7 +204,8 @@ export interface WorkflowProfile {
   readonly subagentTokens: number;
   /** Minimum steps for an independent subtask in a subagent to read fewer context tokens than staying in the main session. */
   readonly splitBreakEvenSteps: number | null;
-  readonly contextState: ContextState | null;
+  /** The context grew mainly from read and search steps. */
+  readonly explorationHeavy: boolean;
   readonly recentAvgWeightedTokens: number | null;
   readonly activeWindowAvgWeightedTokens: number | null;
   readonly sessionWeightedTokens: number;
@@ -201,22 +214,37 @@ export interface WorkflowProfile {
 
 export interface OptionLoad {
   readonly option: AdviceOption;
-  /** Processed once, before or with the next message. */
+  /** Processed once, before or with the next step. */
   readonly oneTime: number;
-  readonly perMessage: number;
-  /** oneTime + horizon × perMessage. */
+  readonly perStep: number;
+  /** oneTime + TASK-1 × perStep: the load over a typical task. */
   readonly total: number;
-  /** First whole-message horizon at which it matches or beats keeping going; null means never. Always 0 for keepGoing. */
-  readonly breakEvenMessages: number | null;
+  /** First whole step count at which it matches or beats keeping going; null means never. Always 0 for keepGoing. */
+  readonly breakEvenSteps: number | null;
 }
 
-export type AdviceUnknownReason =
-  | "modelUnknown"
-  | "contextUnknown"
-  | "freshStartUnknown"
-  | "postCompactionUnknown"
-  | "summaryUnknown"
-  | "remainingUnknown";
+/** One of the two ADVICE-1 cases: keep going against one alternative. */
+export interface AdviceCase {
+  readonly alternative: "compact" | "startFresh";
+  /**
+   * The alternative when it pays back within a typical task (TASK-1), else `keepGoing`; `keepGoing` too when a figure
+   * is missing (`unknownReason` says which).
+   */
+  readonly advice: AdviceOption;
+  readonly unknownReason: "postCompactionUnknown" | "summaryUnknown" | null;
+  /** null when a figure is missing. */
+  readonly option: OptionLoad | null;
+  /** Break-even in user messages: ceil(break-even steps ÷ STEPS-1); null when it never breaks even or a figure is missing. */
+  readonly breakEvenMessages: number | null;
+  /** Keep-going total minus the alternative's total over a typical task; null when a figure is missing. */
+  readonly saving: number | null;
+  /** `saving` as a share of the keep-going total; null when a figure is missing or keeping going costs nothing. */
+  readonly savingShare: number | null;
+}
+
+export type AdviceVerdict = "wait" | "unknown" | "lean" | "compare";
+
+export type AdviceUnknownReason = "modelUnknown" | "contextUnknown" | "freshStartUnknown" | "taskUnknown" | "stepsUnknown";
 
 export interface SessionAdvice {
   readonly rule: "ADVICE-1";
@@ -228,19 +256,31 @@ export interface SessionAdvice {
   readonly cacheStatus: CacheStatus;
   /** "warm" in LIVE-1 terms; "probablyCold" and "missedOnLastCall" count as cold. */
   readonly warm: boolean;
-  /** null when a figure is missing; `unknownReason` then says which (R-16). */
-  readonly advice: AdviceOption | null;
+  /** The first matching ADVICE-1 step. */
+  readonly verdict: AdviceVerdict;
+  /** Set when `verdict` is "unknown" (R-16). */
   readonly unknownReason: AdviceUnknownReason | null;
-  /** Lowest total; the three options in the order keepGoing, compact, startFresh. Empty when unknown. */
-  readonly options: readonly OptionLoad[];
-  /** Total of keeping going minus total of the advice; zero when the advice is to keep going. */
-  readonly saving: number | null;
-  readonly horizonMessages: number | null;
+  /** Running subagents that will report back into this session. */
+  readonly activeSubagentCount: number;
+  /** Set only when `verdict` is "compare". */
+  readonly keep: OptionLoad | null;
+  /** If the next request is a new task: keep going against a fresh session. */
+  readonly newTask: AdviceCase | null;
+  /** If it continues the current task: keep going against compacting. */
+  readonly sameTask: AdviceCase | null;
+  /** STEPS-1: turn calls per user message. */
+  readonly stepsPerRequest: number | null;
+  /** TASK-1: turn calls of a typical task; the limit for a recommended break-even and the horizon of the totals. */
+  readonly taskSteps: number | null;
+  /** TASK-1 in messages: ceil(taskSteps ÷ stepsPerRequest). */
+  readonly taskMessages: number | null;
+  readonly leanContextTokens: number;
   readonly figures: {
     readonly freshStart: FreshStart | null;
+    readonly task: TypicalTask | null;
+    readonly steps: StepsPerRequest | null;
     readonly postCompaction: PostCompaction | null;
     readonly summary: SummarySize | null;
-    readonly remaining: RemainingMessages | null;
   };
   readonly weights: TokenWeights;
   readonly workflow: WorkflowProfile;
@@ -255,9 +295,10 @@ export interface AdviceInput {
 
 export interface AdviceResult {
   readonly freshStarts: readonly FreshStart[];
+  readonly tasks: readonly TypicalTask[];
+  readonly steps: readonly StepsPerRequest[];
   readonly postCompactions: readonly PostCompaction[];
   readonly summaries: readonly SummarySize[];
-  readonly remaining: readonly RemainingMessages[];
   readonly advice: readonly SessionAdvice[];
 }
 
@@ -280,13 +321,14 @@ export function sessionAdvice(
   }
   const context = (result: CallCacheResult) => contextSize(callById.get(result.callId) as Call);
 
-  const freshStarts = freshStartsOf(cache, callById, topLevel, settings);
+  const { freshStarts, tasks } = freshStartsOf(cache, callById, topLevel, settings);
+  const steps = stepsPerRequest(input.events, bySession, callById, topLevel, settings);
   const { postCompactions, summaries } = compactionFigures(input.events, bySession, callById, topLevel, context, settings);
-  const remaining = remainingMessages(bySession, context, settings);
 
   const openTopLevel = open.filter((s) => topLevel.has(s.sessionId));
   const openTopLevelIds = new Set(openTopLevel.map((s) => s.sessionId));
   const sessionById = new Map(input.sessions.map((s) => [s.id, s]));
+  // A top-level session with no recent call of its own still gets advice while a session under it is open.
   const waitingTopLevel: OpenSession[] = [];
   for (const s of open) {
     let cur = sessionById.get(s.sessionId);
@@ -324,37 +366,109 @@ export function sessionAdvice(
     }
   }
 
+  const figures = { freshStarts, tasks, steps, postCompactions, summaries };
   const advice = [...openTopLevel, ...waitingTopLevel].map((s) =>
-    adviseOne(s, input, open, bySession.get(s.sessionId) ?? [], callById, { freshStarts, postCompactions, summaries, remaining }, settings),
+    adviseOne(s, input, open, bySession.get(s.sessionId) ?? [], callById, figures, settings),
   );
-  return { freshStarts, postCompactions, summaries, remaining, advice };
+  return { freshStarts, tasks, steps, postCompactions, summaries, advice };
 }
 
+/** FRESH-1 and TASK-1 over the same top-level sessions, grouped by the effective model of each first turn call. */
 function freshStartsOf(
   cache: CacheAnalysis,
   callById: ReadonlyMap<string, Call>,
   topLevel: ReadonlySet<string>,
   settings: AdviceConfig,
-): FreshStart[] {
-  const groups = new Map<string, { first: CallCacheResult; sizes: number[] }>();
+): { freshStarts: FreshStart[]; tasks: TypicalTask[] } {
+  const turnsBySession = new Map<string, number>();
+  for (const result of cache.calls) {
+    if (topLevel.has(result.sessionId)) turnsBySession.set(result.sessionId, (turnsBySession.get(result.sessionId) ?? 0) + 1);
+  }
+  const groups = new Map<string, { first: CallCacheResult; sizes: number[]; turns: number[] }>();
   for (const result of cache.calls) {
     if (result.previousCallId !== null || result.model === null || !topLevel.has(result.sessionId)) continue;
     const size = contextSize(callById.get(result.callId) as Call);
     if (size === null) continue;
+    const turns = turnsBySession.get(result.sessionId) as number;
     const k = key(result.harness, result.model, result.modelSource);
     const group = groups.get(k);
-    if (group === undefined) groups.set(k, { first: result, sizes: [size] });
-    else group.sizes.push(size);
+    if (group === undefined) groups.set(k, { first: result, sizes: [size], turns: [turns] });
+    else {
+      group.sizes.push(size);
+      group.turns.push(turns);
+    }
   }
   const minSessions = settings.rules.freshSession.minSessions;
-  return [...groups].sort(([a], [b]) => compareStrings(a, b)).map(([, { first, sizes }]) => ({
-    rule: "FRESH-1",
+  const sorted = [...groups].sort(([a], [b]) => compareStrings(a, b)).map(([, g]) => g);
+  const group = (first: CallCacheResult): Group => ({
     harness: first.harness,
     model: first.model as string,
     modelSource: first.modelSource as ModelSource,
-    sessions: sizes.length,
-    medianContextTokens: lowerMedian(sizes, minSessions),
-    minSessions,
+  });
+  return {
+    freshStarts: sorted.map(({ first, sizes }) => ({
+      rule: "FRESH-1",
+      ...group(first),
+      sessions: sizes.length,
+      medianContextTokens: lowerMedian(sizes, minSessions),
+      minSessions,
+    })),
+    tasks: sorted.map(({ first, turns }) => ({
+      rule: "TASK-1",
+      ...group(first),
+      sessions: turns.length,
+      minSessions,
+      medianSteps: lowerMedian(turns, minSessions),
+    })),
+  };
+}
+
+/**
+ * STEPS-1: per user turn, the turn calls from it up to the next user turn of the same session, grouped by the model of
+ * the first of them. A user turn followed by no turn call is not counted.
+ */
+function stepsPerRequest(
+  events: readonly Event[],
+  bySession: ReadonlyMap<string, readonly CallCacheResult[]>,
+  callById: ReadonlyMap<string, Call>,
+  topLevel: ReadonlySet<string>,
+  settings: AdviceConfig,
+): StepsPerRequest[] {
+  const turnsBySession = new Map<string, number[]>();
+  for (const event of events) {
+    if (event.type !== "userTurn" || !topLevel.has(event.sessionId)) continue;
+    const list = turnsBySession.get(event.sessionId);
+    if (list === undefined) turnsBySession.set(event.sessionId, [event.timestamp]);
+    else list.push(event.timestamp);
+  }
+  const groups = new Map<string, { group: Group; counts: number[] }>();
+  for (const [sessionId, starts] of [...turnsBySession].sort(([a], [b]) => compareStrings(a, b))) {
+    const results = bySession.get(sessionId) ?? [];
+    const sorted = [...new Set(starts)].sort((a, b) => a - b);
+    sorted.forEach((start, index) => {
+      const end = sorted[index + 1] ?? Number.POSITIVE_INFINITY;
+      const within = results.filter((r) => {
+        const t = (callById.get(r.callId) as Call).timestamp;
+        return t >= start && t < end;
+      });
+      const first = within[0];
+      if (first === undefined || first.model === null) return;
+      const k = key(first.harness, first.model, first.modelSource);
+      let entry = groups.get(k);
+      if (entry === undefined) {
+        entry = { group: { harness: first.harness, model: first.model, modelSource: first.modelSource as ModelSource }, counts: [] };
+        groups.set(k, entry);
+      }
+      entry.counts.push(within.length);
+    });
+  }
+  const min = settings.rules.sessionAdvice.minUserTurns;
+  return [...groups].sort(([a], [b]) => compareStrings(a, b)).map(([, { group, counts }]) => ({
+    rule: "STEPS-1",
+    ...group,
+    userTurns: counts.length,
+    minUserTurns: min,
+    medianSteps: lowerMedian(counts, min),
   }));
 }
 
@@ -390,81 +504,13 @@ function compactionFigures(
   };
 }
 
-/** REMAIN-1: per band, the turn calls after a session's context first entered it, by the model of that call. */
-function remainingMessages(
-  bySession: ReadonlyMap<string, readonly CallCacheResult[]>,
-  context: (result: CallCacheResult) => number | null,
-  settings: AdviceConfig,
-): RemainingMessages[] {
-  const edges = settings.rules.sessionAdvice.contextBandEdgesTokens;
-  const groups = new Map<string, { group: Group; band: number; counts: number[] }>();
-  for (const [, results] of [...bySession].sort(([a], [b]) => compareStrings(a, b))) {
-    const entered = new Set<number>();
-    results.forEach((result, index) => {
-      const size = context(result);
-      if (size === null || result.model === null) return;
-      const band = bandOf(size, edges);
-      if (entered.has(band)) return;
-      entered.add(band);
-      const k = `${key(result.harness, result.model, result.modelSource)}\u0000${band}`;
-      let entry = groups.get(k);
-      if (entry === undefined) {
-        entry = { group: { harness: result.harness, model: result.model, modelSource: result.modelSource as ModelSource }, band, counts: [] };
-        groups.set(k, entry);
-      }
-      entry.counts.push(results.length - 1 - index);
-    });
-  }
-  const min = settings.rules.sessionAdvice.minSessions;
-  return [...groups]
-    .sort(([a], [b]) => compareStrings(a, b))
-    .map(([, { group, band, counts }]) => ({
-      rule: "REMAIN-1",
-      ...group,
-      fromTokens: band === 0 ? 0 : (edges[band - 1] as number),
-      toTokens: band < edges.length ? (edges[band] as number) : null,
-      sessions: counts.length,
-      minSessions: min,
-      medianMessages: lowerMedian(counts, min),
-    }));
-}
-
 interface Figures {
   readonly freshStarts: readonly FreshStart[];
+  readonly tasks: readonly TypicalTask[];
+  readonly steps: readonly StepsPerRequest[];
   readonly postCompactions: readonly PostCompaction[];
   readonly summaries: readonly SummarySize[];
-  readonly remaining: readonly RemainingMessages[];
 }
-
-const EDIT_TOOLS = new Set([
-  "edit_file",
-  "write_file",
-  "replace_file_content",
-  "multi_replace_file_content",
-  "Edit",
-  "MultiEdit",
-  "Write",
-  "NotebookEdit",
-  "apply_patch",
-]);
-
-const EXPLORE_TOOLS = new Set([
-  "read_file",
-  "view_file",
-  "view_file_outline",
-  "view_code_item",
-  "grep",
-  "grep_search",
-  "find_by_name",
-  "list_dir",
-  "Read",
-  "Grep",
-  "Glob",
-  "LS",
-  "WebSearch",
-  "WebFetch",
-  "search_web",
-]);
 
 function workflowProfile(
   s: OpenSession,
@@ -487,22 +533,18 @@ function workflowProfile(
       : sessionTurns.filter((r) => (callById.get(r.callId) as Call).timestamp > lastCompactionAt);
   const justCompacted = lastCompactionAt !== null && activeTurns.length === 0;
 
-  let editTurns = 0;
-  let exploreTurns = 0;
+  const counts = { edit: 0, explore: 0, other: 0 };
   const contexts: (number | null)[] = [];
   for (const r of activeTurns) {
     const call = callById.get(r.callId) as Call;
     contexts.push(contextSize(call));
-    const hasEdit = call.toolNames.some((t) => EDIT_TOOLS.has(t));
-    const hasExplore = call.toolNames.some((t) => EXPLORE_TOOLS.has(t));
-    if (hasEdit) editTurns += 1;
-    else if (hasExplore) exploreTurns += 1;
+    counts[turnStepClass(call)] += 1;
   }
   const firstTurnCall = sessionTurns[0] === undefined ? null : (callById.get(sessionTurns[0].callId) as Call);
   const sessionFirstContext = firstTurnCall === null ? null : contextSize(firstTurnCall);
   const firstContextTokens = contexts.find((c): c is number => c !== null) ?? sessionFirstContext;
-  const baseContextTokens = freshStart?.medianContextTokens ?? firstContextTokens;
-  const C = justCompacted ? baseContextTokens : s.contextTokens;
+  const baseContextTokens = freshStart?.medianContextTokens ?? null;
+  const C = s.contextTokens;
   let recentGrowthTokens: number | null = justCompacted ? 0 : null;
   if (!justCompacted && C !== null && contexts.length >= 2) {
     const anchor = contexts[Math.max(0, contexts.length - 4)] ?? firstContextTokens;
@@ -519,36 +561,26 @@ function workflowProfile(
     subagentTokens += (call.inputUncached ?? 0) + (call.cacheRead ?? 0) + (call.cacheWrite ?? 0) + (call.output ?? 0);
   }
 
-  const firstBandEdge = settings.rules.sessionAdvice.contextBandEdgesTokens[0] ?? 0;
-  const leanLimit = baseContextTokens === null ? null : Math.max(2 * baseContextTokens, firstBandEdge);
-  const isLean = justCompacted || (C !== null && leanLimit !== null && C < leanLimit);
-
-  // Delegating a k-step subtask costs 2 parent turns at C (spawn + receive reply) plus k subagent turns at baseContextTokens:
-  // k * C > 2 * C + k * baseContextTokens  <=>  k > 2 * C / (C - baseContextTokens).
+  const lean = settings.rules.sessionAdvice.leanContextTokens;
+  const large = !justCompacted && C !== null && C >= lean;
+  // Delegating a k-step subtask costs 2 parent turns at C (spawn + receive reply) plus k subagent turns at F:
+  // k * C > 2 * C + k * F  <=>  k > 2 * C / (C - F).
   const splitBreakEvenSteps =
-    !isLean && C !== null && baseContextTokens !== null && C > baseContextTokens && baseContextTokens > 0
+    large && baseContextTokens !== null && C > baseContextTokens
       ? Math.floor((2 * C) / (C - baseContextTokens)) + 1
       : null;
-
-  const warm = s.cacheStatus === "warm";
-  let contextState: ContextState | null = null;
-  if (activeSubagentCount > 0) {
-    contextState = "waitingOnSubagents";
-  } else if (isLean && C !== null && baseContextTokens !== null) {
-    contextState = "compactActive";
-  } else if (C !== null && baseContextTokens !== null) {
-    if (!warm) contextState = "coldLargeContext";
-    else if (exploreTurns >= 3 && exploreTurns > 2 * editTurns && exploreTurns * 2 >= activeTurns.length) contextState = "explorationHeavy";
-    else contextState = "activeWorkingSet";
-  }
+  const turns = activeTurns.length;
+  const explorationHeavy =
+    large && counts.explore >= 3 && counts.explore > 2 * counts.edit && counts.explore * 2 >= turns;
 
   const weighted = sessionWeightedSummary(s.sessionId, input, settings);
 
   return {
     rule: "WORKFLOW-1",
-    turns: activeTurns.length,
-    editTurns,
-    exploreTurns,
+    turns,
+    editTurns: counts.edit,
+    exploreTurns: counts.explore,
+    otherTurns: counts.other,
     firstContextTokens,
     baseContextTokens,
     recentGrowthTokens,
@@ -556,7 +588,7 @@ function workflowProfile(
     activeSubagentCount,
     subagentTokens,
     splitBreakEvenSteps,
-    contextState,
+    explorationHeavy,
     recentAvgWeightedTokens: weighted.recentAvgWeightedTokens,
     activeWindowAvgWeightedTokens: weighted.activeWindowAvgWeightedTokens,
     sessionWeightedTokens: weighted.sessionWeightedTokens,
@@ -564,7 +596,7 @@ function workflowProfile(
   };
 }
 
-/** ADVICE-1 for one open session. */
+/** ADVICE-1 for one open top-level session: the first matching step decides (ADR 0017). */
 function adviseOne(
   s: OpenSession,
   input: AdviceInput,
@@ -575,16 +607,21 @@ function adviseOne(
   settings: AdviceConfig,
 ): SessionAdvice {
   const warm = s.cacheStatus === "warm";
-  const same = <T extends { harness: HarnessId; model: string; modelSource: ModelSource }>(list: readonly T[]) => list.find((g) => g.harness === s.harness && g.model === s.model && g.modelSource === s.modelSource) ?? null;
+  const same = <T extends Group>(list: readonly T[]) =>
+    list.find((g) => g.harness === s.harness && g.model === s.model && g.modelSource === s.modelSource) ?? null;
   const freshStart = same(figures.freshStarts);
+  const task = same(figures.tasks);
+  const steps = same(figures.steps);
   const postCompaction = same(figures.postCompactions);
   const summary = same(figures.summaries);
-  const C = s.contextTokens;
-  const remaining =
-    C === null
-      ? null
-      : (figures.remaining.find((r) => r.harness === s.harness && r.model === s.model && r.modelSource === s.modelSource && r.fromTokens <= C && (r.toTokens === null || C < r.toTokens)) ?? null);
   const workflow = workflowProfile(s, input, open, sessionTurns, callById, freshStart, settings);
+  const { leanContextTokens } = settings.rules.sessionAdvice;
+  const C = s.contextTokens;
+  const F = freshStart?.medianContextTokens ?? null;
+  const T = task?.medianSteps ?? null;
+  const R = steps?.medianSteps ?? null;
+  // Steps → user messages, rounded up: a break-even inside a message needs that whole message.
+  const messages = (count: number | null) => (count === null || R === null || R === 0 ? null : Math.ceil(count / R));
 
   const weights = tokenWeightsOf(settings);
   const base = {
@@ -596,70 +633,89 @@ function adviseOne(
     contextTokens: C,
     cacheStatus: s.cacheStatus,
     warm,
-    figures: { freshStart, postCompaction, summary, remaining },
+    activeSubagentCount: workflow.activeSubagentCount,
+    stepsPerRequest: R,
+    taskSteps: T,
+    taskMessages: messages(T),
+    leanContextTokens,
+    figures: { freshStart, task, steps, postCompaction, summary },
     weights,
     workflow,
     callIds: [s.lastCallId],
   };
-  const unknown = (reason: AdviceUnknownReason): SessionAdvice => ({ ...base, advice: null, unknownReason: reason, options: [], saving: null, horizonMessages: remaining?.medianMessages ?? null });
+  const settle = (verdict: Exclude<AdviceVerdict, "compare">, unknownReason: AdviceUnknownReason | null = null): SessionAdvice => ({
+    ...base, verdict, unknownReason, keep: null, newTask: null, sameTask: null,
+  });
 
-  if (s.model === null) return unknown("modelUnknown");
-  if (C === null) return unknown("contextUnknown");
-  const F = freshStart?.medianContextTokens ?? null;
-  const P = postCompaction?.medianContextTokens ?? null;
-  const S = summary?.medianTokens ?? null;
-  const H = remaining?.medianMessages ?? null;
-  if (F === null) return unknown("freshStartUnknown");
-  if (P === null) return unknown("postCompactionUnknown");
-  if (S === null) return unknown("summaryUnknown");
-  if (H === null) return unknown("remainingUnknown");
+  if (workflow.activeSubagentCount > 0) return settle("wait");
+  if (s.model === null) return settle("unknown", "modelUnknown");
+  if (C === null) return settle("unknown", "contextUnknown");
+  if (C < leanContextTokens) return settle("lean");
+  if (F === null) return settle("unknown", "freshStartUnknown");
+  if (T === null) return settle("unknown", "taskUnknown");
+  if (R === null) return settle("unknown", "stepsUnknown");
 
-  // Compare exact millionths so fractional weights cannot change ties or break-even horizons (ADR 0017).
+  // Exact millionths so fractional weights cannot change ties or break-even steps (ADR 0017).
   const units = (weight: number) => BigInt(Math.round(weight * TOKEN_WEIGHT_SCALE));
   const read = units(weights.cacheRead);
   const write = units(weights.cacheWrite);
   const output = units(weights.output);
+  const horizon = BigInt(T);
   const context = BigInt(C);
-  const post = BigInt(P);
-  const summarySize = BigInt(S);
   const fresh = BigInt(F);
   const keepInitial = warm ? 0n : context * write;
-  const keepPerMessage = context * read;
+  const keepPerStep = context * read;
+  const keepTotal = keepInitial + horizon * keepPerStep;
   const load = (value: bigint) => Number(value) / TOKEN_WEIGHT_SCALE;
 
-  const option = (name: AdviceOption, initial: bigint, perMessage: bigint) => {
-    const total = initial + BigInt(H) * perMessage;
+  const optionLoad = (option: AdviceOption, initial: bigint, perStep: bigint): { load: OptionLoad; total: bigint } => {
+    const total = initial + horizon * perStep;
     const initialGap = initial - keepInitial;
-    const perMessageSaving = keepPerMessage - perMessage;
-    const breakEvenMessages =
-      initialGap <= 0n ? 0 : perMessageSaving <= 0n ? null : Number((initialGap + perMessageSaving - 1n) / perMessageSaving);
-    const result: OptionLoad = {
-      option: name, oneTime: load(initial), perMessage: load(perMessage), total: load(total), breakEvenMessages,
+    const perStepSaving = keepPerStep - perStep;
+    const breakEvenSteps =
+      initialGap <= 0n ? 0 : perStepSaving <= 0n ? null : Number((initialGap + perStepSaving - 1n) / perStepSaving);
+    return { load: { option, oneTime: load(initial), perStep: load(perStep), total: load(total), breakEvenSteps }, total };
+  };
+  const decide = (alternative: AdviceCase["alternative"], option: { load: OptionLoad; total: bigint }): AdviceCase => {
+    // Recommend the alternative only when it pays back within a typical task: strictly cheaper over TASK-1 steps.
+    // A tie keeps going, the less disruptive option.
+    const saving = keepTotal - option.total;
+    const qualifies = saving > 0n;
+    return {
+      alternative,
+      advice: qualifies ? alternative : "keepGoing",
+      unknownReason: null,
+      option: option.load,
+      breakEvenMessages: messages(option.load.breakEvenSteps),
+      saving: load(saving),
+      savingShare: keepTotal === 0n ? null : Number(saving) / Number(keepTotal),
     };
-    return { result, total };
   };
-  const keep = option("keepGoing", keepInitial, keepPerMessage);
-  const compactInitial = warm ? context * read + summarySize * write : (context + post) * write;
-  const alternatives = [
-    option("compact", compactInitial + summarySize * output, post * read),
-    option("startFresh", fresh * write, fresh * read),
-  ];
-  // Keep the earlier, less disruptive option on a tie.
-  const best = alternatives.reduce((chosen, candidate) => (candidate.total < chosen.total ? candidate : chosen), keep);
-  return {
-    ...base,
-    advice: best.result.option,
-    unknownReason: null,
-    options: [keep, ...alternatives].map(({ result }) => result),
-    saving: load(keep.total - best.total),
-    horizonMessages: H,
-  };
-}
 
-function bandOf(tokens: number, edges: readonly number[]): number {
-  let band = 0;
-  while (band < edges.length && tokens >= (edges[band] as number)) band += 1;
-  return band;
+  const keep = optionLoad("keepGoing", keepInitial, keepPerStep);
+  const newTask = decide("startFresh", optionLoad("startFresh", fresh * write, fresh * read));
+
+  const P = postCompaction?.medianContextTokens ?? null;
+  const S = summary?.medianTokens ?? null;
+  let sameTask: AdviceCase;
+  if (P === null || S === null) {
+    sameTask = {
+      alternative: "compact",
+      advice: "keepGoing",
+      unknownReason: P === null ? "postCompactionUnknown" : "summaryUnknown",
+      option: null,
+      breakEvenMessages: null,
+      saving: null,
+      savingShare: null,
+    };
+  } else {
+    const post = BigInt(P);
+    const summarySize = BigInt(S);
+    const compactInitial = (warm ? context * read + summarySize * write : (context + post) * write) + summarySize * output;
+    sameTask = decide("compact", optionLoad("compact", compactInitial, post * read));
+  }
+
+  return { ...base, verdict: "compare", unknownReason: null, keep: keep.load, newTask, sameTask };
 }
 
 /** Lower middle value; null below `min` values. */
@@ -677,4 +733,3 @@ function contextSize(call: Call): number | null {
   if (call.inputUncached === null || call.cacheRead === null || call.cacheWrite === null) return null;
   return call.inputUncached + call.cacheRead + call.cacheWrite;
 }
-

@@ -1,0 +1,15 @@
+{"timestamp":"2026-10-31T12:00:00Z","type":"session_meta","payload":{"id":"fixture-tools","cwd":"/fixture/project"}}
+{"timestamp":"2026-10-31T12:00:01Z","type":"turn_context","payload":{"model":"fixture-model"}}
+{"timestamp":"2026-10-31T12:00:02Z","type":"event_msg","payload":{"type":"task_started"}}
+{"timestamp":"2026-10-31T12:00:02Z","type":"event_msg","payload":{"type":"user_message"}}
+{"timestamp":"2026-10-31T12:00:03Z","type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"text(await tools.exec_command({cmd: \"rg pattern src | head\"}))"}}
+{"timestamp":"2026-10-31T12:00:04Z","type":"token_usage_record","payload":{"response_id":"r1","usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":20,"total_tokens":120},"thread_token_usage":{"total_tokens":120}}}
+{"timestamp":"2026-10-31T12:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":60,"output_tokens":20,"total_tokens":120},"total_token_usage":{"total_tokens":120}}}}
+{"timestamp":"2026-10-31T12:00:06Z","type":"response_item","payload":{"type":"custom_tool_call","name":"exec","input":"await tools.apply_patch(\"*** Begin Patch\")"}}
+{"timestamp":"2026-10-31T12:00:07Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\": \"sed -n 1,5p file.txt\"}"}}
+{"timestamp":"2026-10-31T12:00:08Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":30,"cached_input_tokens":10,"output_tokens":10,"total_tokens":40},"total_token_usage":{"total_tokens":160}}}}
+{"timestamp":"2026-10-31T12:00:09Z","type":"event_msg","payload":{"type":"task_started"}}
+{"timestamp":"2026-10-31T12:00:09Z","type":"response_item","payload":{"type":"function_call","name":"js","arguments":"{\"code\": \"const r = await tools.exec_command({workdir: \\\"w\\\", cmd: `npm test`}); text(r)\"}"}}
+{"timestamp":"2026-10-31T12:00:10Z","type":"response_item","payload":{"type":"local_shell_call","action":{"command":["bash","-lc","git diff"]}}}
+{"timestamp":"2026-10-31T12:00:11Z","type":"response_item","payload":{"type":"function_call","name":"sleep","arguments":"{\"duration_ms\": 10}"}}
+{"timestamp":"2026-10-31T12:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":30,"cached_input_tokens":20,"output_tokens":10,"total_tokens":40},"total_token_usage":{"total_tokens":200}}}}

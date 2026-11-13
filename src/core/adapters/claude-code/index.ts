@@ -34,8 +34,10 @@ import type {
   EventType,
   Session,
   SourceRef,
+  StepClass,
   TokenCount,
 } from "../../model/index.js";
+import { classifyShellCommand } from "../../model/step.js";
 import type { LogFile } from "../../host/index.js";
 import { compareByTimeThenSource, compareSources, compareStrings } from "../../order.js";
 import { type Diagnose, isObject, parseTimestamp, push } from "../shared.js";
@@ -106,7 +108,14 @@ interface RequestLine {
   readonly model: string | null;
   readonly usage: Usage;
   readonly toolNames: readonly string[];
+  readonly shellCalls: readonly ShellCall[];
   readonly source: SourceRef;
+}
+
+/** STEP-1: one `Bash` tool call, by tool_use id, with its class only (R-18). */
+interface ShellCall {
+  readonly id: string | null;
+  readonly stepClass: StepClass;
 }
 
 interface MarkerLine {
@@ -320,6 +329,7 @@ export function combineClaudeCode(results: readonly ClaudeCodeFileResult[]): Ada
         reasoning: null,
         cacheWriteByTtlSeconds: null,
         toolNames: [],
+        shellClasses: [],
         sources,
       });
     } else {
@@ -501,6 +511,7 @@ function readAssistant(
         reasoning: isObject(details) ? count(details["thinking_tokens"], "output_tokens_details.thinking_tokens") : null,
       },
       toolNames: toolNamesOf(message["content"]),
+      shellCalls: shellCallsOf(message["content"]),
       source,
     },
   };
@@ -531,6 +542,18 @@ function buildCall(
   for (const line of own) {
     for (const name of line.toolNames) if (!toolNames.includes(name)) toolNames.push(name);
   }
+  // A content block can repeat across lines of one request; count each tool_use id once.
+  const seenShell = new Set<string>();
+  const shellClasses: StepClass[] = [];
+  for (const line of own) {
+    for (const shell of line.shellCalls) {
+      if (shell.id !== null) {
+        if (seenShell.has(shell.id)) continue;
+        seenShell.add(shell.id);
+      }
+      shellClasses.push(shell.stepClass);
+    }
+  }
 
   return {
     id: `${HARNESS}:${requestId}`,
@@ -540,6 +563,7 @@ function buildCall(
     kind: "turn",
     ...final.usage,
     toolNames,
+    shellClasses,
     sources: lines.map((line) => line.source).sort(compareSources),
   };
 }
@@ -551,6 +575,19 @@ function toolNamesOf(content: unknown): string[] {
     if (isObject(block) && block["type"] === "tool_use" && typeof block["name"] === "string") names.push(block["name"]);
   }
   return names;
+}
+
+/** STEP-1 (ADR 0017): classify each `Bash` tool_use from its command; the command itself is discarded (R-18). */
+function shellCallsOf(content: unknown): ShellCall[] {
+  if (!Array.isArray(content)) return [];
+  const calls: ShellCall[] = [];
+  for (const block of content) {
+    if (!isObject(block) || block["type"] !== "tool_use" || block["name"] !== "Bash") continue;
+    const input = block["input"];
+    const command = isObject(input) && typeof input["command"] === "string" ? input["command"] : null;
+    calls.push({ id: typeof block["id"] === "string" ? block["id"] : null, stepClass: command === null ? "other" : classifyShellCommand(command) });
+  }
+  return calls;
 }
 
 /** COMPACT-1 (ADR 0017): `compactMetadata` of a `compact_boundary` line; a field that is missing or malformed is null. */

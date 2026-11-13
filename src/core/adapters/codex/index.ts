@@ -1,6 +1,7 @@
 // Codex rollout normalization (ADR 0018, R-15–R-23).
 import type { LogFile } from "../../host/index.js";
-import type { AdapterOutput, Call, CapabilityTable, Diagnostic, Event, QuotaSample, Session, SourceRef } from "../../model/index.js";
+import type { AdapterOutput, Call, CapabilityTable, Diagnostic, Event, QuotaSample, Session, SourceRef, StepClass } from "../../model/index.js";
+import { classifyShellCommand } from "../../model/step.js";
 import { compareByTimeThenSource, compareSources, compareStrings } from "../../order.js";
 import { isObject, parseTimestamp, push } from "../shared.js";
 
@@ -30,7 +31,15 @@ interface Request extends Counts {
   cumulativeTotal: number | null;
   readonly timestamp: number;
   readonly model: string | null;
+  readonly toolNames: string[];
+  readonly shellClasses: StepClass[];
   readonly sources: SourceRef[];
+}
+
+/** STEP-1: tool calls logged since the last request, waiting for the request that made them (ADR 0017). */
+interface PendingTools {
+  readonly names: string[];
+  readonly shellClasses: StepClass[];
 }
 
 interface CodexFileResult {
@@ -67,6 +76,73 @@ function readCounts(usage: Fields): Counts {
   };
 }
 
+/** Tools that run a shell command directly, and the argument that holds it. */
+const SHELL_TOOLS: ReadonlySet<string> = new Set(["shell", "exec_command", "local_shell"]);
+/** Tools whose input is a script that calls other tools as `tools.<name>(…)`. */
+const SCRIPT_TOOLS: ReadonlySet<string> = new Set(["exec", "js"]);
+const NESTED_TOOL = /\btools\.(\w+)\(/g;
+const NESTED_CMD = /^\s*\{[^}]*?\bcmd\s*:\s*(["'`])((?:\\[\s\S]|(?!\1)[^\\])*)\1/;
+
+function addTool(tools: PendingTools, name: string, command: string | null | undefined): void {
+  if (!tools.names.includes(name)) tools.names.push(name);
+  if (command !== undefined) tools.shellClasses.push(command === null ? "other" : classifyShellCommand(command));
+}
+
+function shellCommand(args: Fields | null): string | null {
+  const cmd = args?.cmd ?? args?.command;
+  if (typeof cmd === "string") return cmd;
+  if (Array.isArray(cmd) && cmd.every((part) => typeof part === "string")) {
+    // ["bash", "-lc", "<script>"] runs its last part; any other argv is the command itself.
+    return cmd.length === 3 && cmd[1] === "-lc" ? (cmd[2] as string) : cmd.join(" ");
+  }
+  return null;
+}
+
+/** Nested `tools.<name>(…)` calls in a script tool's code; a literal `cmd` of `exec_command` is classified. */
+function addScriptTools(tools: PendingTools, outer: string, code: string): void {
+  let found = false;
+  for (const match of code.matchAll(NESTED_TOOL)) {
+    const name = match[1] as string;
+    found = true;
+    if (!SHELL_TOOLS.has(name)) {
+      addTool(tools, name, undefined);
+      continue;
+    }
+    const literal = NESTED_CMD.exec(code.slice((match.index ?? 0) + match[0].length));
+    const command = literal === null ? null : (literal[2] as string).replace(/\\([\s\S])/g, (_, ch: string) => ch === "n" ? "\n" : ch === "t" ? "\t" : ch);
+    addTool(tools, name, command);
+  }
+  if (!found) addTool(tools, outer, undefined);
+}
+
+/** STEP-1 (ADR 0017): tool names and shell classes of one response item; arguments are discarded after reading (R-18). */
+function readTool(payload: Fields, tools: PendingTools): void {
+  const name = string(payload.name);
+  if (payload.type === "local_shell_call") {
+    addTool(tools, "local_shell", shellCommand(object(payload.action)));
+    return;
+  }
+  if (name === null) return;
+  let args: Fields | null = null;
+  if (typeof payload.arguments === "string") {
+    try {
+      args = object(JSON.parse(payload.arguments));
+    } catch {
+      args = null;
+    }
+  }
+  const input = typeof payload.input === "string" ? payload.input : null;
+  if (SCRIPT_TOOLS.has(name)) {
+    const code = input ?? (typeof args?.code === "string" ? args.code : null);
+    if (code === null) addTool(tools, name, undefined);
+    else addScriptTools(tools, name, code);
+  } else if (SHELL_TOOLS.has(name)) {
+    addTool(tools, name, shellCommand(args));
+  } else {
+    addTool(tools, name, undefined);
+  }
+}
+
 function repeatsUsage(request: Request, requestUsage: Fields, cumulativeTotal: number | null, snapshotUsage: Fields): boolean {
   return (request.cumulativeTotal === null || cumulativeTotal === null || request.cumulativeTotal === cumulativeTotal)
     && TOKEN_KEYS.every((key) => count(requestUsage[key]) === count(snapshotUsage[key]));
@@ -98,6 +174,14 @@ export function readCodexFile(file: LogFile): CodexFileResult {
   let model: string | null = null;
   let previousTotal = 0;
   let pending: { request: Request; usage: Fields } | null = null;
+  let tools: PendingTools = { names: [], shellClasses: [] };
+  let turnOpen = false;
+  const takeTools = (): Pick<Request, "toolNames" | "shellClasses"> => {
+    turnOpen = false;
+    const taken = { toolNames: tools.names, shellClasses: tools.shellClasses };
+    tools = { names: [], shellClasses: [] };
+    return taken;
+  };
   const requests: Request[] = [];
   const markers: Omit<Event, "id" | "sessionId">[] = [];
   const quotaSamples: QuotaSample[] = [];
@@ -146,10 +230,16 @@ export function readCodexFile(file: LogFile): CodexFileResult {
       continue;
     }
 
+    if (entry.type === "response_item" && (payload.type === "function_call" || payload.type === "custom_tool_call" || payload.type === "local_shell_call")) {
+      readTool(payload, tools);
+      continue;
+    }
+
     const tokenCount = entry.type === "event_msg" && payload.type === "token_count";
     const requestRecord = entry.type === "token_usage_record";
+    // Newer rollouts log `task_started` and no `user_message`; older ones may log both for one turn.
     const marker = entry.type === "compacted" ? "compaction"
-      : entry.type === "event_msg" && payload.type === "user_message" ? "userTurn" : null;
+      : entry.type === "event_msg" && (payload.type === "user_message" || payload.type === "task_started") ? "userTurn" : null;
     if (!tokenCount && !requestRecord && marker === null) continue;
     const timestamp = parseTimestamp(entry.timestamp);
     if (timestamp === null) {
@@ -158,6 +248,9 @@ export function readCodexFile(file: LogFile): CodexFileResult {
     }
 
     if (marker !== null) {
+      // A second user-turn marker before the next request belongs to the same turn.
+      if (marker === "userTurn" && turnOpen) continue;
+      if (marker === "userTurn") turnOpen = true;
       markers.push({ timestamp, type: marker, childSessionId: null, compaction: null, sources: [source] });
       continue;
     }
@@ -170,7 +263,7 @@ export function readCodexFile(file: LogFile): CodexFileResult {
         continue;
       }
       const cumulativeTotal = total(payload.thread_token_usage);
-      const request = { ...readCounts(usage), responseId, cumulativeTotal, timestamp, model, sources: [source] };
+      const request = { ...readCounts(usage), responseId, cumulativeTotal, timestamp, model, ...takeTools(), sources: [source] };
       requests.push(request);
       pending = { request, usage };
       if (cumulativeTotal !== null) previousTotal = Math.max(previousTotal, cumulativeTotal);
@@ -191,7 +284,7 @@ export function readCodexFile(file: LogFile): CodexFileResult {
       pending.request.sources.push(source);
       pending.request.cumulativeTotal ??= cumulativeTotal;
     } else if (cumulativeTotal !== null && cumulativeTotal > previousTotal) {
-      requests.push({ ...readCounts(usage), responseId: null, cumulativeTotal, timestamp, model, sources: [source] });
+      requests.push({ ...readCounts(usage), responseId: null, cumulativeTotal, timestamp, model, ...takeTools(), sources: [source] });
     } else if (cumulativeTotal === null) {
       warn("unsupportedUsage", "Codex token snapshot has no valid cumulative total; skipped.", source);
     }
@@ -246,7 +339,7 @@ export function combineCodex(results: readonly CodexFileResult[]): AdapterOutput
       const existing = calls.get(id);
       const explicit = request.responseId !== null;
       const { responseId: _response, cumulativeTotal: _total, ...fields } = request;
-      const call: Call = { ...fields, id, sessionId, kind: "turn", cacheWriteByTtlSeconds: null, toolNames: [] };
+      const call: Call = { ...fields, id, sessionId, kind: "turn", cacheWriteByTtlSeconds: null };
       if (existing === undefined) {
         calls.set(id, { call, explicit });
       } else {

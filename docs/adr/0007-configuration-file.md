@@ -51,7 +51,7 @@ The top-level sections are listed below. The keys inside each section are define
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "logRoots":   { "claudeCode": ["~/.claude/projects"], "antigravity": ["…"], "codex": ["…"], "opencode": ["…"] },
   "sessionIndexRoots": { "claudeCode": ["…"], "antigravity": [], "codex": [], "opencode": [] },
   "models":     { "assumed": { "antigravity": "…" } },

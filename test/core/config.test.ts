@@ -83,10 +83,9 @@ describe("validation errors", () => {
     ]);
   });
 
-  it("rejects session advice context band edges that are not strictly ascending (ADR 0017)", () => {
-    assert.deepEqual(errorsOf(withUser({ rules: { sessionAdvice: { contextBandEdgesTokens: [100000, 50000] } } })), [
-      { file: "user.json", path: "rules.sessionAdvice.contextBandEdgesTokens[1]", message: "values must be strictly ascending" },
-    ]);
+  it("rejects a lean context below one token and removed advice keys (ADR 0017)", () => {
+    assert.equal(errorsOf(withUser({ rules: { sessionAdvice: { leanContextTokens: 0 } } }))[0]?.path, "rules.sessionAdvice.leanContextTokens");
+    assert.equal(errorsOf(withUser({ rules: { sessionAdvice: { contextBandEdgesTokens: [50000] } } }))[0]?.path, "rules.sessionAdvice.contextBandEdgesTokens");
   });
 
   it("rejects Usage summary ranges that are empty or not strictly ascending (R-33)", () => {
@@ -100,8 +99,8 @@ describe("validation errors", () => {
     assert.deepEqual(errorsOf(withUser({ pricing: {} })), [
       { file: "user.json", path: "pricing", message: "unknown key" },
     ]);
-    assert.match(errorsOf(withUser({ schemaVersion: 1 }))[0]?.message ?? "", /expected schemaVersion 2/);
-    assert.ok(withUser({ schemaVersion: 2, usage: { timeZone: "UTC" } }).ok);
+    assert.match(errorsOf(withUser({ schemaVersion: 1 }))[0]?.message ?? "", /expected schemaVersion 3/);
+    assert.ok(withUser({ schemaVersion: 3, usage: { timeZone: "UTC" } }).ok);
   });
 
   it("rejects token weights beyond six decimal places (ADR 0017)", () => {

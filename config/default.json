@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "logRoots": {
     "claudeCode": ["~/.claude/projects"],
     "antigravity": ["~/.gemini/antigravity/brain"],
@@ -44,8 +44,8 @@
     "freshSession": { "minSessions": 5 },
     "sessionAdvice": {
       "minCompactions": 5,
-      "minSessions": 5,
-      "contextBandEdgesTokens": [50000, 100000, 200000, 500000],
+      "minUserTurns": 5,
+      "leanContextTokens": 50000,
       "recentTurnsWindow": 5,
       "weights": {
         "cacheRead": 0.1,
