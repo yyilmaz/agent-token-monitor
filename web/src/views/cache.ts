@@ -3,6 +3,7 @@
 
 import type { GapBand, LifetimeGroup, MissCauseKind } from "../../../src/core/analysis/cache.js";
 import type { cache, CauseTotal } from "../../../src/core/api/index.js";
+import { harnessLabel, modelLabel } from "../badges.js";
 import { h } from "../dom.js";
 import * as f from "../format.js";
 
@@ -31,14 +32,16 @@ export function renderCache(data: Cache): HTMLElement {
 
 function lifetimeCard(g: LifetimeGroup): HTMLElement {
   const pauses = g.survived + g.gone;
-  const modelLabel = f.model(g.model, g.modelSource, g.harness);
+  const modelLabelText = f.model(g.model, g.modelSource, g.harness);
   return h(
     "div",
     { class: "card p-5" },
     h(
       "div",
-      { class: "label", ...(modelLabel === f.UNKNOWN_GEMINI_MODEL_LABEL ? { title: f.UNKNOWN_GEMINI_MODEL_NOTE } : {}) },
-      `${f.harness(g.harness)} · ${modelLabel}`,
+      { class: "label", ...(modelLabelText === f.UNKNOWN_GEMINI_MODEL_LABEL ? { title: f.UNKNOWN_GEMINI_MODEL_NOTE } : {}) },
+      harnessLabel(g.harness),
+      " · ",
+      modelLabel(g.model, g.modelSource, g.harness),
     ),
     h(
       "div",

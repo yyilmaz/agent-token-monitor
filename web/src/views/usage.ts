@@ -2,6 +2,7 @@
 
 import type { TokenSum, UsageFigures, UsagePeriod } from "../../../src/core/analysis/usage.js";
 import type { usage } from "../../../src/core/api/index.js";
+import { harnessLabel, modelLabel } from "../badges.js";
 import { barChart } from "../chart.js";
 import { h } from "../dom.js";
 import * as f from "../format.js";
@@ -166,7 +167,7 @@ function sources(list: Usage["sources"]): HTMLElement | null {
   const waiting = list.filter((s) => !s.read && s.files > 0);
   if (read.length === 0 && waiting.length === 0) return null;
   const names = (items: Usage["sources"]) =>
-    items.flatMap((s, i) => [i > 0 ? " · " : "", h("span", { title: `${f.tokens(s.files)} log ${s.files === 1 ? "file" : "files"} found` }, f.harness(s.harness))]);
+    items.flatMap((s, i) => [i > 0 ? " · " : "", h("span", { title: `${f.tokens(s.files)} log ${s.files === 1 ? "file" : "files"} found` }, harnessLabel(s.harness))]);
   return h(
     "div",
     { class: "sources d-flex flex-wrap row-gap-1 column-gap-5 small" },
@@ -253,11 +254,16 @@ function dailyChart(
 
 /** "Where did it go?": each harness, repository (worktrees folded in) or model, with token totals, largest first. */
 function where(periods: readonly UsagePeriod[], state: UsageState, onChange: (next: UsageState) => void): HTMLElement {
-  const sums = new Map<string, { tokens: number; harness: string | null }>();
+  const sums = new Map<string, { tokens: number; harness: string | null; model: string | null; modelSource: string | null }>();
   for (const p of periods) {
     for (const s of state.where === "harness" ? p.byHarness : state.where === "project" ? p.byProject : p.byModel) {
       const label = state.where === "harness" ? f.harness(s.harness) : state.where === "project" ? f.repository(s.project) : `${f.harness(s.harness)} · ${f.model(s.model, s.modelSource, s.harness)}`;
-      const entry = sums.get(label) ?? { tokens: 0, harness: state.where === "harness" ? s.harness : null };
+      const entry = sums.get(label) ?? {
+        tokens: 0,
+        harness: state.where === "project" ? null : s.harness,
+        model: state.where === "model" ? s.model : null,
+        modelSource: state.where === "model" ? s.modelSource : null,
+      };
       entry.tokens += all(s.figures);
       sums.set(label, entry);
     }
@@ -286,9 +292,17 @@ function where(periods: readonly UsagePeriod[], state: UsageState, onChange: (ne
           "div",
           { class: "card p-5 shares" },
           rows.flatMap((r) => [
-            h("span", { class: "share-label", ...(r.label.includes(f.UNKNOWN_GEMINI_MODEL_LABEL) ? { title: f.UNKNOWN_GEMINI_MODEL_NOTE } : {}) }, r.label),
+            h(
+              "span",
+              { class: "share-label", ...(r.label.includes(f.UNKNOWN_GEMINI_MODEL_LABEL) ? { title: f.UNKNOWN_GEMINI_MODEL_NOTE } : {}) },
+              state.where === "harness"
+                ? harnessLabel(r.harness)
+                : state.where === "model"
+                  ? [harnessLabel(r.harness), " · ", modelLabel(r.model, r.modelSource, r.harness)]
+                  : r.label,
+            ),
             // By harness, each bar wears its harness's chart color; otherwise the one default series color.
-            h("progress", { class: r.harness === null ? "progress share" : `progress share ${HARNESS_COLOR[r.harness]?.slice(2) ?? ""}`, value: String(r.tokens), max: String(total || 1) }),
+            h("progress", { class: state.where !== "harness" || r.harness === null ? "progress share" : `progress share ${HARNESS_COLOR[r.harness]?.slice(2) ?? ""}`, value: String(r.tokens), max: String(total || 1) }),
             h("span", { class: "num" }, share(r.tokens, total)),
             h("span", { class: "num", title: `${f.tokens(r.tokens)} tokens` }, f.compactTokens(r.tokens)),
           ]),

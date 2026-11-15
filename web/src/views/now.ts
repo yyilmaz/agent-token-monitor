@@ -5,6 +5,7 @@ import type { DiagnosticGroup } from "../../../src/core/analysis/diagnostics.js"
 import type { OpenSession, TreeRow } from "../../../src/core/analysis/live.js";
 import type { diagnostics, overview } from "../../../src/core/api/index.js";
 import { adviceBadge, adviceDetailsNodes, adviceTag } from "../advice.js";
+import { harnessLabel, modelLabel } from "../badges.js";
 import { h, sessionLink, svg, table } from "../dom.js";
 import * as f from "../format.js";
 
@@ -163,7 +164,10 @@ export function renderNow(data: Overview, state: NowState, onChange: (next: NowS
       undefined,
       "open-sessions",
     ),
-    rows.some((r) => sessionModelText(r, adviceById.get(r.sessionId)) === f.UNKNOWN_GEMINI_MODEL_LABEL)
+    rows.some((r) => {
+      const info = sessionModelInfo(r, adviceById.get(r.sessionId));
+      return info !== null && f.model(info.model, info.modelSource, r.harness) === f.UNKNOWN_GEMINI_MODEL_LABEL;
+    })
       ? h("p", { class: "muted small mt-2" }, f.UNKNOWN_GEMINI_MODEL_NOTE)
       : null,
   );
@@ -229,12 +233,10 @@ function filterTree(tree: readonly TreeRow[], state: NowState): TreeRow[] {
   return tree.filter((_, i) => keep.has(i));
 }
 
-function sessionModelText(r: TreeRow, adv: SessionAdvice | undefined): string {
-  return r.open !== null
-    ? f.model(r.open.model, r.open.modelSource, r.harness)
-    : adv !== undefined && adv.model !== null
-      ? f.model(adv.model, adv.modelSource, r.harness)
-      : "";
+function sessionModelInfo(r: TreeRow, adv: SessionAdvice | undefined): { model: string | null; modelSource: string | null } | null {
+  if (r.open !== null) return { model: r.open.model, modelSource: r.open.modelSource };
+  if (adv !== undefined && adv.model !== null) return { model: adv.model, modelSource: adv.modelSource };
+  return null;
 }
 
 /** The title, else the project folder or short session ID, with harness and model metadata underneath (TREE-1, ADR 0016). */
@@ -242,12 +244,13 @@ function sessionCell(r: TreeRow, adv: SessionAdvice | undefined): HTMLElement {
   const isSubagent = r.relation === "subagent";
   const hasName = r.title !== null || r.project !== null;
   const name = sessionDisplayName(r);
-  const modelText = sessionModelText(r, adv);
-  const metaParts = [
-    r.title !== null && r.project !== null ? f.project(r.project) : "",
-    f.harness(r.harness),
-    modelText,
-  ].filter((part) => part !== "");
+  const modelInfo = sessionModelInfo(r, adv);
+  const modelText = modelInfo === null ? "" : f.model(modelInfo.model, modelInfo.modelSource, r.harness);
+  const metaNodes = [
+    r.title !== null && r.project !== null ? f.project(r.project) : null,
+    harnessLabel(r.harness),
+    modelInfo === null ? null : modelLabel(modelInfo.model, modelInfo.modelSource, r.harness),
+  ].filter((part): part is string | HTMLElement => part !== null);
 
   return h(
     "div",
@@ -261,7 +264,7 @@ function sessionCell(r: TreeRow, adv: SessionAdvice | undefined): HTMLElement {
         ? null
         : h("span", { class: "muted small" }, isSubagent ? " · subagent" : " · side session"),
     ),
-    metaParts.length === 0
+    metaNodes.length === 0
       ? null
       : h(
           "div",
@@ -269,7 +272,7 @@ function sessionCell(r: TreeRow, adv: SessionAdvice | undefined): HTMLElement {
             class: "muted small session-meta",
             ...(modelText === f.UNKNOWN_GEMINI_MODEL_LABEL ? { title: f.UNKNOWN_GEMINI_MODEL_NOTE } : {}),
           },
-          metaParts.join(" · "),
+          metaNodes.flatMap((node, i) => (i > 0 ? [" · ", node] : [node])),
         ),
   );
 }
@@ -365,7 +368,7 @@ export function renderDiagnostics(data: ReturnType<typeof diagnostics>): HTMLEle
               h("div", { class: "muted small" }, g.message, " ", h("code", {}, g.code)),
             ),
         },
-        { title: "Harness", cell: (g) => f.harness(g.harness) },
+        { title: "Harness", cell: (g) => harnessLabel(g.harness) },
         { title: "Count", numeric: true, cell: (g) => String(g.count) },
         { title: "Files", numeric: true, cell: (g) => String(g.files) },
         {

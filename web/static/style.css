@@ -406,3 +406,17 @@ progress.share.series-4::-moz-progress-bar { background: var(--series-4); }
 .traj-inspector-grid { font-variant-numeric: tabular-nums; }
 tr.flash-row td { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); transition: background 0.3s; }
 .wrap { white-space: normal; }
+
+/* Self-authored inline SVG harness and model badges (ADR 0020, CSP-safe without inline styles). */
+.badge-label { display: inline-flex; align-items: center; gap: 5px; vertical-align: middle; }
+.entity-badge { flex-shrink: 0; vertical-align: middle; font-family: system-ui, -apple-system, sans-serif; user-select: none; }
+.harness-badge { --badge-color: var(--muted); }
+.harness-badge.badge-series-1 { --badge-color: var(--series-1); }
+.harness-badge.badge-series-2 { --badge-color: var(--series-2); }
+.harness-badge.badge-series-3 { --badge-color: var(--series-3); }
+.harness-badge.badge-series-4 { --badge-color: var(--series-4); }
+.harness-badge.badge-series-neutral { --badge-color: var(--muted); }
+.harness-badge rect { fill: color-mix(in srgb, var(--badge-color) 16%, transparent); stroke: var(--badge-color); stroke-width: 1.25; }
+.harness-badge text { fill: var(--badge-color); font-size: 7.4px; font-weight: 700; letter-spacing: -0.02em; }
+.model-badge rect { fill: transparent; stroke: color-mix(in srgb, var(--muted) 55%, transparent); stroke-width: 1.1; }
+.model-badge text { fill: var(--muted); font-size: 6.8px; font-weight: 600; letter-spacing: -0.01em; }

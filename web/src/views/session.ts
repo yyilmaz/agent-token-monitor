@@ -2,6 +2,7 @@
 
 import type { CacheClass, MissCauseKind } from "../../../src/core/analysis/cache.js";
 import type { session } from "../../../src/core/api/index.js";
+import { harnessLabel, modelLabel } from "../badges.js";
 import { card, h, sessionLink, svg, table } from "../dom.js";
 import * as f from "../format.js";
 
@@ -125,7 +126,9 @@ export function renderSession(data: SessionData): HTMLElement {
         class: "muted small",
         ...(sessionModel === f.UNKNOWN_GEMINI_MODEL_LABEL ? { title: f.UNKNOWN_GEMINI_MODEL_NOTE } : {}),
       },
-      `${f.harness(s.harness)}${sessionModel === null ? "" : ` · ${sessionModel}`} · ${s.id}`,
+      harnessLabel(s.harness),
+      turnRows[0] === undefined ? null : [" · ", modelLabel(turnRows[0].model, turnRows[0].modelSource, s.harness)],
+      ` · ${s.id}`,
       s.projectPath === null ? null : ` · project: ${s.projectPath}`,
       s.parentSessionId === null
         ? null
