@@ -28,6 +28,7 @@ Several concrete technical choices are not yet recorded in ADR 0002, ADR 0005, o
    - Add `"@types/vscode": "1.108.0"` (pinned to an exact version, matching `engines.vscode`) to `devDependencies`. Runtime dependencies remain zero (ADR 0004).
    - Add `"vscode"` to `"types"` in `tsconfig.json` (or import `"vscode"` with `@types/vscode` installed).
    - Add `"@vscode/vsce": "4.1.1"` (exact version) to `devDependencies` for `.vsix` packaging only. It is never loaded at runtime.
+   - Add `"overrides": { "minimatch": "11.0.8" }` so the transitive `minimatch` of `vsce` is not the version flagged by `npm audit` (GHSA-g3hv-75wg-m249). Remove the override once `vsce` ships a fixed range.
 3. **`.vsix` packaging:**
    - `npm run package` runs `vsce package` and writes `agent-token-monitor-<version>.vsix` to the repository root. `*.vsix` is git-ignored.
    - `vsce` runs `vscode:prepublish` (`npm run build`) first, so the package always contains a fresh `dist/`.
