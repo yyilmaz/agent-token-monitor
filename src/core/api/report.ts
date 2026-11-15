@@ -65,7 +65,8 @@ export function buildHtmlReport(report: ReportData, assets: ReportAssets): strin
   // Strip external stylesheet links and script tags from the template; inline replacements take their place.
   const withoutExternals = assets.indexHtml
     .replace(/^[ \t]*<link\s+rel="stylesheet"\s+href="[^"]+"\s*\/>\r?\n?/gm, "")
-    .replace(/^[ \t]*<script(?:\s+type="module")?\s+src="[^"]+"><\/script[^>]*>\r?\n?/gm, "");
+    // One external script element per line (web/static/index.html); drop the whole line instead of matching its end tag.
+    .replace(/^[ \t]*<script\b[^\n]*\ssrc="[^"]+"[^\n]*$\r?\n?/gm, "");
 
   const withHead = withoutExternals.replace("</head>", `${cspMeta}\n${styles}\n  </head>`);
   return withHead.replace("</body>", `    ${dataScript}\n    ${inlineScript}\n  </body>`);
