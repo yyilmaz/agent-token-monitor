@@ -13,6 +13,7 @@ Working rules for every AI agent (Antigravity, Claude Code, Codex, OpenCode, …
 - The owner approves a **scope of work** (a task, an issue or an ADR to implement). Inside that scope, work freely: read, edit, create files and run tests without asking at each step.
 - Ask before going beyond the approved scope, before deleting or rewriting unrelated files, and before adding a new dependency.
 - **Commit and push only with the owner's explicit approval.** Never force-push or rewrite published history.
+- **All development targets `dev`.** Never commit or push directly to `main`. Changes reach `main` only via a Pull Request from `dev` to `main` with all CI checks green.
 
 ## 3. Requirements and decisions
 

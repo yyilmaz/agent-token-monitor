@@ -4,7 +4,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, dev]
 
 permissions:
   contents: read
@@ -47,3 +47,18 @@ jobs:
           printf '%s  %s\n' "$GITLEAKS_SHA256" "$RUNNER_TEMP/$archive" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
           "$RUNNER_TEMP/gitleaks" git --log-opts="--diff-merges=first-parent HEAD" --redact=100 --no-banner .
+
+  enforce-dev-to-main:
+    name: Enforce dev -> main PR
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Verify source branch is dev
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [ "$HEAD_REF" != "dev" ]; then
+            echo "::error::Pull requests targeting main must originate from 'dev' (got '$HEAD_REF')."
+            exit 1
+          fi
