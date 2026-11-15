@@ -44,7 +44,13 @@ An AI coding agent can silently re-read an entire long session after its prompt 
 
 ## Quick start
 
-**Requirements:** macOS (default log paths) and **Node.js 22.12+**. There is no package to install — clone and run locally:
+**Requirements:** macOS, Linux, or Windows and **Node.js 22.12+**. Run directly without cloning:
+
+```bash
+npx agent-token-monitor
+```
+
+Or clone and run from source:
 
 ```bash
 git clone https://github.com/yyilmaz/agent-token-monitor.git
@@ -53,18 +59,20 @@ npm ci
 npm start
 ```
 
-`npm start` compiles TypeScript and serves the dashboard at **`http://127.0.0.1:4317`**.
+`npx agent-token-monitor` binds to `127.0.0.1` on an OS-assigned free port (pass `--port 4317` for a fixed port) and prints the local URL. `npm start` compiles TypeScript and serves the dashboard at **`http://127.0.0.1:4317`**.
 
 ### CLI & configuration options
 
 | Command / Flag | Description |
 |---|---|
+| `npx agent-token-monitor` | Serve the dashboard on `127.0.0.1` using an OS-assigned free port |
 | `npm start` | Build and serve the dashboard on `http://127.0.0.1:4317` |
-| `node dist/src/hosts/node/main.js --port 8080` | Serve on a custom port (use `--port 0` for an OS-assigned free port) |
-| `node dist/src/hosts/node/main.js --config <path>` | Load a custom user configuration file |
-| `npm run build && npm run status` | Print the current JSON overview (`Now` + `ADVICE-1` + `WORKFLOW-1`) to stdout and exit |
+| `agent-token-monitor --port 8080` | Serve on a custom port (use `--port 0` for an OS-assigned free port) |
+| `agent-token-monitor --config <path>` | Load a custom user configuration file |
+| `agent-token-monitor --status` (or `npm run status`) | Print the current JSON overview (`Now` + `ADVICE-1` + `WORKFLOW-1`) to stdout and exit |
+| `agent-token-monitor --help` | Print CLI usage and exit |
 
-The server binds to `127.0.0.1` only and rejects requests with any other `Host` header ([ADR 0013](docs/adr/0013-server-data-api-and-dashboard.md)). For custom log directories (including Linux/Windows paths), assumed models, or cache thresholds, see [docs/configuration.md](docs/configuration.md).
+The server binds to `127.0.0.1` only and rejects requests with any other `Host` header ([ADR 0013](docs/adr/0013-server-data-api-and-dashboard.md)). Default log paths resolve automatically for macOS, Linux, and Windows; for custom log directories, assumed models, or cache thresholds, see [docs/configuration.md](docs/configuration.md).
 
 ---
 

@@ -1,7 +1,6 @@
 {
   "name": "agent-token-monitor",
   "version": "0.0.0",
-  "private": true,
   "description": "Local, deterministic view of where AI coding agent tokens go, computed from the logs already on disk.",
   "license": "MIT",
   "author": "Yusuf Yılmaz",
@@ -24,13 +23,24 @@
     "local-first"
   ],
   "type": "module",
+  "bin": {
+    "agent-token-monitor": "./dist/src/hosts/node/main.js"
+  },
+  "files": [
+    "config/default.json",
+    "dist/src/",
+    "dist/web/",
+    "web/static/",
+    "web/vendor/"
+  ],
   "engines": {
     "node": ">=22.12"
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "npm run build",
     "start": "tsc && node dist/src/hosts/node/main.js --port 4317",
-    "status": "node dist/src/hosts/node/main.js --status",
+    "status": "tsc && node dist/src/hosts/node/main.js --status",
     "test": "tsc && node --test \"dist/test/**/*.test.js\""
   },
   "devDependencies": {

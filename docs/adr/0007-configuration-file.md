@@ -21,7 +21,7 @@ ADR 0004 forbids runtime dependencies, and R-26 requires the configuration to wo
 
 ### Files and precedence
 
-1. **`config/default.json`** ships with the product and is the single source of every default value. Code reads values only from the validated configuration object and never declares a fallback constant.
+1. **`config/default.json`** ships with the product and is the single source of every default value. Code reads values only from the validated configuration object and never declares a fallback constant. Its optional `platformDefaults` section (keyed by `darwin`, `linux`, `win32`) overrides base `logRoots` and `sessionIndexRoots` for the host's platform before the user file is merged.
 2. **One optional user file** uses the same schema and contains only the keys the user wants to change. It is merged over the defaults:
    - objects merge key by key, recursively;
    - arrays and scalar values replace the default as a whole;
@@ -54,6 +54,7 @@ The top-level sections are listed below. The keys inside each section are define
   "schemaVersion": 3,
   "logRoots":   { "claudeCode": ["~/.claude/projects"], "antigravity": ["…"], "codex": ["…"], "opencode": ["…"] },
   "sessionIndexRoots": { "claudeCode": ["…"], "antigravity": [], "codex": [], "opencode": [] },
+  "platformDefaults": { "darwin": { "…": "…" }, "linux": { "…": "…" }, "win32": { "…": "…" } },
   "models":     { "assumed": { "antigravity": "…" } },
   "liveView":   { "…": "…" },
   "cache":      { "…": "…" },
@@ -63,7 +64,8 @@ The top-level sections are listed below. The keys inside each section are define
 ```
 
 - `models.assumed` names the model to assume, per harness, for calls whose log records no model (ADR 0009 rule `MODEL-1`). It is empty by default. Its keys must be harness IDs (`claudeCode`, `antigravity`, `codex`, `opencode`); any other key is an error.
-- `~` in paths is expanded by the host, not the core, so Windows and Linux paths need no code change (R-24).
+- `platformDefaults` holds per-platform (`darwin`, `linux`, `win32`) overrides for `logRoots` and `sessionIndexRoots`, resolved by `loadConfig` when a platform is given, before merging the user file (R-24, R-72).
+- `~` and leading environment variables (`$VAR` and `%VAR%`) in paths are expanded by the host, not the core; entries referencing unset environment variables are omitted, and duplicate expanded paths are collapsed (R-24).
 
 ### No secrets
 

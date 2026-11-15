@@ -64,6 +64,29 @@ describe("user override (ADR 0007)", () => {
   it("accepts an empty object", () => {
     assert.equal(withUser({}).ok, true);
   });
+
+  it("applies platformDefaults for darwin, linux, and win32 before user overrides (R-24)", () => {
+    const darwin = loadConfig({ defaults, user: null, platform: "darwin" });
+    const linux = loadConfig({ defaults, user: null, platform: "linux" });
+    const win32 = loadConfig({ defaults, user: null, platform: "win32" });
+    assert.ok(darwin.ok && linux.ok && win32.ok);
+
+    assert.deepEqual(darwin.config.sessionIndexRoots.claudeCode, ["~/Library/Application Support/Claude/claude-code-sessions"]);
+    assert.deepEqual(linux.config.sessionIndexRoots.claudeCode, ["$XDG_CONFIG_HOME/Claude/claude-code-sessions", "~/.config/Claude/claude-code-sessions"]);
+    assert.deepEqual(linux.config.logRoots.opencode, ["$XDG_DATA_HOME/opencode", "~/.local/share/opencode"]);
+    assert.deepEqual(win32.config.sessionIndexRoots.claudeCode, ["%APPDATA%/Claude/claude-code-sessions", "~/AppData/Roaming/Claude/claude-code-sessions"]);
+    assert.deepEqual(win32.config.logRoots.opencode, ["%LOCALAPPDATA%/opencode", "~/.local/share/opencode"]);
+
+    // User override replaces the platform-resolved array as a whole.
+    const overridden = loadConfig({
+      defaults,
+      user: { path: "user.json", text: JSON.stringify({ sessionIndexRoots: { claudeCode: ["/custom/claude-sessions"] } }) },
+      platform: "win32",
+    });
+    assert.ok(overridden.ok);
+    assert.deepEqual(overridden.config.sessionIndexRoots.claudeCode, ["/custom/claude-sessions"]);
+    assert.deepEqual(overridden.config.logRoots.opencode, ["%LOCALAPPDATA%/opencode", "~/.local/share/opencode"]);
+  });
 });
 
 describe("validation errors", () => {
@@ -79,6 +102,16 @@ describe("validation errors", () => {
         file: "user.json",
         path: "models.assumed.antigravty",
         message: "unknown key; allowed: claudeCode, antigravity, codex, opencode",
+      },
+    ]);
+  });
+
+  it("rejects an unknown platform key in platformDefaults", () => {
+    assert.deepEqual(errorsOf(withUser({ platformDefaults: { freebsd: {} } })), [
+      {
+        file: "user.json",
+        path: "platformDefaults.freebsd",
+        message: "unknown key; allowed: darwin, linux, win32",
       },
     ]);
   });

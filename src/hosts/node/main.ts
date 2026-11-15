@@ -1,6 +1,8 @@
-// Standalone entry point: node dist/src/hosts/node/main.js [--config <path>] [--port <n>] [--status] (ADR 0013).
+#!/usr/bin/env node
+// Standalone entry point: node dist/src/hosts/node/main.js [--config <path>] [--port <n>] [--status] [--help] (ADR 0013).
 // Prints the dashboard URL (or JSON overview with --status); does not open a browser and writes nothing to disk.
 
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
@@ -23,14 +25,29 @@ export function portArgument(argv: readonly string[]): number | null {
   return 0;
 }
 
+const HELP_TEXT = `Usage: agent-token-monitor [options]
+
+Options:
+  --port <n>       Listen on port n on 127.0.0.1 (default: 0, OS-assigned free port)
+  --config <path>  Path to user configuration JSON file
+  --status         Print JSON overview to stdout and exit
+  -h, --help       Show this help message and exit
+`;
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
+  if (argv.includes("--help") || argv.includes("-h")) {
+    process.stdout.write(HELP_TEXT);
+    return;
+  }
   const homeDir = homedir();
   const store = new AnalysisStore({
     defaultsPath: defaultConfigPath(),
     userConfigPath: resolveUserConfigPath({ argv, env: process.env, homeDir, cwd: process.cwd() }),
     homeDir,
     systemTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    platform: process.platform,
+    env: process.env,
   });
   if (argv.includes("--status")) {
     const now = Date.now();
@@ -62,4 +79,13 @@ async function main(): Promise<void> {
   console.log(`agent-token-monitor: http://127.0.0.1:${(server.address() as AddressInfo).port}/`);
 }
 
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) await main();
+function isDirectExecution(): boolean {
+  if (process.argv[1] === undefined) return false;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectExecution()) await main();

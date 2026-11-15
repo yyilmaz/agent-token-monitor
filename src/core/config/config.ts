@@ -7,10 +7,18 @@ import { validate, type ValidationError } from "./validate.js";
 /** Version of the configuration schema. Bumped when keys change incompatibly. */
 export const CONFIG_SCHEMA_VERSION = 3;
 
+const PLATFORM_KEYS: readonly string[] = ["darwin", "linux", "win32"];
+
+const platformRoots = object({
+  logRoots: optional(record(array(string()), { keys: HARNESS_KEYS })),
+  sessionIndexRoots: optional(record(array(string()), { keys: HARNESS_KEYS })),
+});
+
 export const configSchema = object({
   schemaVersion: integer(1),
   logRoots: perHarness(array(string())),
   sessionIndexRoots: perHarness(array(string())),
+  platformDefaults: record(platformRoots, { keys: PLATFORM_KEYS }),
   usage: object({
     timeZone: string(),
   }),
@@ -73,21 +81,30 @@ export type ConfigResult =
 export interface ConfigInput {
   readonly defaults: { readonly path: string; readonly text: string };
   readonly user: { readonly path: string; readonly text: string } | null;
+  readonly platform?: string;
 }
 
 /**
  * Parses, validates and merges the shipped defaults with the optional user file.
+ * When `platform` is given, matching `platformDefaults` are applied before the user override (ADR 0007, R-24).
  * Any error yields no configuration at all: callers must not fall back to partial values (ADR 0007).
  */
 export function loadConfig(input: ConfigInput): ConfigResult {
   const defaults = parseDocument(input.defaults.path, input.defaults.text, false);
   if (!defaults.ok) return defaults;
 
-  let merged: unknown = defaults.value;
+  let base: unknown = defaults.value;
+  if (input.platform !== undefined) {
+    const platformDefaults = (defaults.value as { platformDefaults?: Record<string, unknown> }).platformDefaults;
+    const platformOverride = platformDefaults?.[input.platform];
+    if (platformOverride !== undefined) base = mergeConfig(base, platformOverride);
+  }
+
+  let merged: unknown = base;
   if (input.user !== null) {
     const user = parseDocument(input.user.path, input.user.text, true);
     if (!user.ok) return user;
-    merged = mergeConfig(defaults.value, user.value);
+    merged = mergeConfig(base, user.value);
   }
 
   // Reaching here with errors means the shipped defaults are incomplete or invalid.

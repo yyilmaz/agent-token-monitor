@@ -25,7 +25,7 @@ If no user file exists, the defaults apply. The tool never creates or rewrites i
 - `null` is not allowed.
 - `schemaVersion` must match the version the tool expects (currently `3`). There is no silent migration. For a version 2 user file, remove `rules.sessionAdvice.minSessions` and `rules.sessionAdvice.contextBandEdgesTokens` if present and update an explicit `schemaVersion` to `3`. For a version 1 file, also remove the `pricing` key.
 - On any error, the tool shows the file, the key path and the reason, and shows no analysis results.
-- A leading `~` in paths means your home directory.
+- A leading `~` in paths means your home directory; leading `$VAR` or `%VAR%` environment variables are expanded by the host, and entries referencing unset variables are omitted.
 - The configuration in effect is shown in the dashboard and embedded in exported reports (R-10, R-71).
 
 Example user file that points Claude Code at a second log directory and lowers the full-miss threshold:
@@ -52,7 +52,7 @@ Where each harness writes its logs (R-24). Each is an array of directory paths; 
 | `logRoots.claudeCode` | `["~/.claude/projects"]` | |
 | `logRoots.antigravity` | `["~/.gemini/antigravity/brain"]` | |
 | `logRoots.codex` | `["~/.codex/sessions"]` | Reads `rollout-*.jsonl` files recursively. For a custom Codex home, point this at its `sessions` directory. Add `~/.codex/archived_sessions` to include archived rollouts ([ADR 0018](adr/0018-codex-adapter.md)). |
-| `logRoots.opencode` | `["~/.local/share/opencode"]` | Phase 2 (R-21). Until its adapter exists, only the presence of `opencode.db` is checked; the database is never opened (R-15) |
+| `logRoots.opencode` | `["~/.local/share/opencode"]` (Linux also checks `$XDG_DATA_HOME/opencode`; Windows checks `%LOCALAPPDATA%/opencode` and `~/.local/share/opencode`) | Phase 2 (R-21). Until its adapter exists, only the presence of `opencode.db` is checked; the database is never opened (R-15) |
 
 ### `sessionIndexRoots`
 
@@ -60,10 +60,14 @@ Where a harness's app keeps one index file per session, with its title and the s
 
 | Key | Default | Notes |
 |---|---|---|
-| `sessionIndexRoots.claudeCode` | `["~/Library/Application Support/Claude/claude-code-sessions"]` | The Claude desktop app on macOS; set your platform's path elsewhere (R-24) |
+| `sessionIndexRoots.claudeCode` | macOS: `["~/Library/Application Support/Claude/claude-code-sessions"]`<br>Linux: `["$XDG_CONFIG_HOME/Claude/claude-code-sessions", "~/.config/Claude/claude-code-sessions"]`<br>Windows: `["%APPDATA%/Claude/claude-code-sessions", "~/AppData/Roaming/Claude/claude-code-sessions"]` | The Claude desktop app (R-24) |
 | `sessionIndexRoots.antigravity` | `["~/.gemini/antigravity/annotations"]` | Antigravity per-conversation `.pbtxt` annotation files (`title`) |
 | `sessionIndexRoots.codex` | `[]` | |
 | `sessionIndexRoots.opencode` | `[]` | |
+
+### `platformDefaults`
+
+Per-platform (`darwin`, `linux`, `win32`) overrides for `logRoots` and `sessionIndexRoots` in [`config/default.json`](../config/default.json). Applied for the host's platform before merging the user file, so user overrides always win (R-24, R-72).
 
 ### `usage`
 

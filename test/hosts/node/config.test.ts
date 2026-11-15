@@ -10,8 +10,10 @@ import { after, describe, it } from "node:test";
 import {
   defaultConfigPath,
   expandHome,
+  expandRootPath,
   loadConfigFromFiles,
   resolveLogRoots,
+  resolveSessionIndexRoots,
   resolveUserConfigPath,
 } from "../../../src/hosts/node/config.js";
 
@@ -51,6 +53,18 @@ describe("expandHome", () => {
   });
 });
 
+describe("expandRootPath", () => {
+  it("expands leading $VAR and %VAR% when set, and returns null when unset or empty", () => {
+    const env = { XDG_CONFIG_HOME: "/xdg", APPDATA: "/win/AppData/Roaming", EMPTY: "" };
+    assert.equal(expandRootPath("$XDG_CONFIG_HOME/Claude/sessions", HOME, env), "/xdg/Claude/sessions");
+    assert.equal(expandRootPath("%APPDATA%/Claude/sessions", HOME, env), "/win/AppData/Roaming/Claude/sessions");
+    assert.equal(expandRootPath("$MISSING_VAR/Claude", HOME, env), null);
+    assert.equal(expandRootPath("%MISSING_VAR%/Claude", HOME, env), null);
+    assert.equal(expandRootPath("$EMPTY/Claude", HOME, env), null);
+    assert.equal(expandRootPath("~/.claude/projects", HOME, env), "/home/user/.claude/projects");
+  });
+});
+
 describe("loadConfigFromFiles", () => {
   const dir = mkdtempSync(join(tmpdir(), "atm-config-test-"));
   after(() => rmSync(dir, { recursive: true, force: true }));
@@ -73,5 +87,79 @@ describe("loadConfigFromFiles", () => {
     writeFileSync(userPath, JSON.stringify({ ui: { pollInterval: 1 } }));
     const result = await loadConfigFromFiles(defaultConfigPath(), userPath);
     assert.deepEqual(result, { ok: false, errors: [{ file: userPath, path: "ui.pollInterval", message: "unknown key" }] });
+  });
+
+  it("resolves platform-appropriate defaults for darwin, linux, and win32 (R-24)", async () => {
+    const missing = join(dir, "missing.json");
+
+    const darwin = await loadConfigFromFiles(defaultConfigPath(), missing, "darwin");
+    assert.ok(darwin.ok);
+    assert.deepEqual(resolveLogRoots(darwin.config, "/Users/alice", {}), {
+      claudeCode: ["/Users/alice/.claude/projects"],
+      antigravity: ["/Users/alice/.gemini/antigravity/brain"],
+      codex: ["/Users/alice/.codex/sessions"],
+      opencode: ["/Users/alice/.local/share/opencode"],
+    });
+    assert.deepEqual(resolveSessionIndexRoots(darwin.config, "/Users/alice", {}), {
+      claudeCode: ["/Users/alice/Library/Application Support/Claude/claude-code-sessions"],
+      antigravity: ["/Users/alice/.gemini/antigravity/annotations"],
+      codex: [],
+      opencode: [],
+    });
+
+    const linux = await loadConfigFromFiles(defaultConfigPath(), missing, "linux");
+    assert.ok(linux.ok);
+    assert.deepEqual(resolveLogRoots(linux.config, HOME, {}), {
+      claudeCode: ["/home/user/.claude/projects"],
+      antigravity: ["/home/user/.gemini/antigravity/brain"],
+      codex: ["/home/user/.codex/sessions"],
+      opencode: ["/home/user/.local/share/opencode"],
+    });
+    assert.deepEqual(resolveSessionIndexRoots(linux.config, HOME, {}), {
+      claudeCode: ["/home/user/.config/Claude/claude-code-sessions"],
+      antigravity: ["/home/user/.gemini/antigravity/annotations"],
+      codex: [],
+      opencode: [],
+    });
+    assert.deepEqual(
+      resolveSessionIndexRoots(linux.config, HOME, { XDG_CONFIG_HOME: "/custom/xdg" }).claudeCode,
+      ["/custom/xdg/Claude/claude-code-sessions", "/home/user/.config/Claude/claude-code-sessions"],
+    );
+    assert.deepEqual(
+      resolveSessionIndexRoots(linux.config, HOME, { XDG_CONFIG_HOME: "/home/user/.config" }).claudeCode,
+      ["/home/user/.config/Claude/claude-code-sessions"],
+    );
+
+    const win32 = await loadConfigFromFiles(defaultConfigPath(), missing, "win32");
+    assert.ok(win32.ok);
+    const winHome = "/win/Users/alice";
+    const winEnv = { APPDATA: "/win/Users/alice/AppData/Roaming", LOCALAPPDATA: "/win/Users/alice/AppData/Local" };
+    assert.deepEqual(resolveLogRoots(win32.config, winHome, winEnv), {
+      claudeCode: ["/win/Users/alice/.claude/projects"],
+      antigravity: ["/win/Users/alice/.gemini/antigravity/brain"],
+      codex: ["/win/Users/alice/.codex/sessions"],
+      opencode: ["/win/Users/alice/AppData/Local/opencode", "/win/Users/alice/.local/share/opencode"],
+    });
+    assert.deepEqual(resolveSessionIndexRoots(win32.config, winHome, winEnv), {
+      claudeCode: ["/win/Users/alice/AppData/Roaming/Claude/claude-code-sessions"],
+      antigravity: ["/win/Users/alice/.gemini/antigravity/annotations"],
+      codex: [],
+      opencode: [],
+    });
+    assert.deepEqual(resolveSessionIndexRoots(win32.config, winHome, {}).claudeCode, [
+      "/win/Users/alice/AppData/Roaming/Claude/claude-code-sessions",
+    ]);
+  });
+
+  it("lets user overrides take precedence over platform defaults", async () => {
+    const userPath = join(dir, "win-override.json");
+    writeFileSync(userPath, JSON.stringify({ sessionIndexRoots: { claudeCode: ["/custom/win-sessions"] } }));
+    const result = await loadConfigFromFiles(defaultConfigPath(), userPath, "win32");
+    assert.ok(result.ok);
+    assert.deepEqual(resolveSessionIndexRoots(result.config, HOME, { APPDATA: "/win/AppData" }).claudeCode, ["/custom/win-sessions"]);
+    assert.deepEqual(resolveLogRoots(result.config, HOME, { LOCALAPPDATA: "/win/Local" }).opencode, [
+      "/win/Local/opencode",
+      "/home/user/.local/share/opencode",
+    ]);
   });
 });

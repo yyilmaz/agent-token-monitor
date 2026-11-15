@@ -71,6 +71,8 @@ export interface StoreOptions {
   readonly homeDir: string;
   /** The time zone the host reports, used when usage.timeZone is "system". */
   readonly systemTimeZone: string;
+  readonly platform?: string;
+  readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
 export class AnalysisStore {
@@ -109,7 +111,9 @@ export class AnalysisStore {
 
   private async refresh(now: number): Promise<StoreState> {
     this.checkedAt = now;
-    const loaded = await loadConfigFromFiles(this.options.defaultsPath, this.options.userConfigPath);
+    const platform = this.options.platform ?? process.platform;
+    const env = this.options.env ?? process.env;
+    const loaded = await loadConfigFromFiles(this.options.defaultsPath, this.options.userConfigPath, platform);
     const configPrint = await fileStamp(this.options.defaultsPath) + "|" + (await fileStamp(this.options.userConfigPath));
     if (!loaded.ok) {
       this.fingerprint = configPrint;
@@ -122,8 +126,8 @@ export class AnalysisStore {
       this.files = new Map();
       this.configPrint = configPrint;
     }
-    const roots = resolveLogRoots(config, this.options.homeDir);
-    const indexRoots = resolveSessionIndexRoots(config, this.options.homeDir);
+    const roots = resolveLogRoots(config, this.options.homeDir, env);
+    const indexRoots = resolveSessionIndexRoots(config, this.options.homeDir, env);
     // Each adapter's log roots ("<harness>:<i>") and session index roots ("<harness>Index:<i>"), with their patterns.
     const rootSets = ADAPTERS.flatMap((adapter) => [
       { adapter, pattern: adapter.pattern, keys: logRootKeys(adapter.harness, roots[adapter.harness]) },

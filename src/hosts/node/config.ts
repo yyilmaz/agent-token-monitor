@@ -50,18 +50,63 @@ export function expandHome(path: string, homeDir: string): string {
   return path;
 }
 
-/** Log roots per harness with `~` expanded. */
-export function resolveLogRoots(config: Config, homeDir: string): Readonly<Record<HarnessId, readonly string[]>> {
-  return expandRoots(config.logRoots, homeDir);
+const UNIX_ENV_PREFIX = /^\$([A-Za-z_][A-Za-z0-9_]*)(?:[\\/](.*))?$/;
+const WIN_ENV_PREFIX = /^%([A-Za-z_][A-Za-z0-9_]*)%(?:[\\/](.*))?$/;
+
+/**
+ * Expands leading `~` and leading environment variables (`$VAR`, `%VAR%`).
+ * Returns `null` when a referenced environment variable is unset or empty so unused platform templates are skipped.
+ */
+export function expandRootPath(
+  path: string,
+  homeDir: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string | null {
+  const match = UNIX_ENV_PREFIX.exec(path) ?? WIN_ENV_PREFIX.exec(path);
+  if (match !== null) {
+    const value = env[match[1] as string];
+    if (value === undefined || value === "") return null;
+    const rest = match[2];
+    return rest !== undefined && rest !== "" ? join(value, rest) : value;
+  }
+  return expandHome(path, homeDir);
 }
 
-/** Folders of session index files (ADR 0016), with `~` expanded. */
-export function resolveSessionIndexRoots(config: Config, homeDir: string): Readonly<Record<HarnessId, readonly string[]>> {
-  return expandRoots(config.sessionIndexRoots, homeDir);
+/** Log roots per harness with `~` and environment variables expanded. */
+export function resolveLogRoots(
+  config: Config,
+  homeDir: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): Readonly<Record<HarnessId, readonly string[]>> {
+  return expandRoots(config.logRoots, homeDir, env);
 }
 
-function expandRoots(roots: Readonly<Record<HarnessId, readonly string[]>>, homeDir: string): Readonly<Record<HarnessId, readonly string[]>> {
-  const expand = (paths: readonly string[]) => paths.map((path) => expandHome(path, homeDir));
+/** Folders of session index files (ADR 0016), with `~` and environment variables expanded. */
+export function resolveSessionIndexRoots(
+  config: Config,
+  homeDir: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): Readonly<Record<HarnessId, readonly string[]>> {
+  return expandRoots(config.sessionIndexRoots, homeDir, env);
+}
+
+function expandRoots(
+  roots: Readonly<Record<HarnessId, readonly string[]>>,
+  homeDir: string,
+  env: Readonly<Record<string, string | undefined>>,
+): Readonly<Record<HarnessId, readonly string[]>> {
+  const expand = (paths: readonly string[]) => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const path of paths) {
+      const expanded = expandRootPath(path, homeDir, env);
+      if (expanded !== null && !seen.has(expanded)) {
+        seen.add(expanded);
+        result.push(expanded);
+      }
+    }
+    return result;
+  };
   return { claudeCode: expand(roots.claudeCode), antigravity: expand(roots.antigravity), codex: expand(roots.codex), opencode: expand(roots.opencode) };
 }
 
@@ -90,7 +135,11 @@ function isMissingFile(error: unknown): boolean {
 }
 
 /** Reads both files and returns the validated configuration or every error found. */
-export async function loadConfigFromFiles(defaultsPath: string, userPath: string): Promise<ConfigResult> {
+export async function loadConfigFromFiles(
+  defaultsPath: string,
+  userPath: string,
+  platform: string = process.platform,
+): Promise<ConfigResult> {
   const source = new FileConfigSource(defaultsPath, userPath);
   let defaultsText: string;
   let user: UserConfigText | null;
@@ -104,7 +153,7 @@ export async function loadConfigFromFiles(defaultsPath: string, userPath: string
   } catch (error) {
     return readFailure(userPath, error);
   }
-  return loadConfig({ defaults: { path: defaultsPath, text: defaultsText }, user });
+  return loadConfig({ defaults: { path: defaultsPath, text: defaultsText }, user, platform });
 }
 
 function readFailure(file: string, error: unknown): ConfigResult {

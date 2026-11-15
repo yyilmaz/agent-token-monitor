@@ -12,6 +12,29 @@
     "codex": [],
     "opencode": []
   },
+  "platformDefaults": {
+    "darwin": {
+      "sessionIndexRoots": {
+        "claudeCode": ["~/Library/Application Support/Claude/claude-code-sessions"]
+      }
+    },
+    "linux": {
+      "logRoots": {
+        "opencode": ["$XDG_DATA_HOME/opencode", "~/.local/share/opencode"]
+      },
+      "sessionIndexRoots": {
+        "claudeCode": ["$XDG_CONFIG_HOME/Claude/claude-code-sessions", "~/.config/Claude/claude-code-sessions"]
+      }
+    },
+    "win32": {
+      "logRoots": {
+        "opencode": ["%LOCALAPPDATA%/opencode", "~/.local/share/opencode"]
+      },
+      "sessionIndexRoots": {
+        "claudeCode": ["%APPDATA%/Claude/claude-code-sessions", "~/AppData/Roaming/Claude/claude-code-sessions"]
+      }
+    }
+  },
   "usage": {
     "timeZone": "system"
   },
