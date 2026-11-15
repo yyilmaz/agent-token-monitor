@@ -1,9 +1,15 @@
 {
   "name": "agent-token-monitor",
+  "displayName": "Agent Token Monitor",
   "version": "0.0.0",
   "description": "Local, deterministic view of where AI coding agent tokens go, computed from the logs already on disk.",
+  "publisher": "yyilmaz",
   "license": "MIT",
   "author": "Yusuf Yılmaz",
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
   "homepage": "https://github.com/yyilmaz/agent-token-monitor#readme",
   "repository": {
     "type": "git",
@@ -23,8 +29,28 @@
     "local-first"
   ],
   "type": "module",
+  "main": "./dist/src/hosts/vscode/extension.js",
   "bin": {
     "agent-token-monitor": "./dist/src/hosts/node/main.js"
+  },
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentTokenMonitor.openDashboard",
+        "title": "Agent Token Monitor: Open Dashboard"
+      }
+    ],
+    "configuration": {
+      "title": "Agent Token Monitor",
+      "properties": {
+        "agentTokenMonitor.configPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to user configuration JSON file. Leave empty to use the default path (~/.config/agent-token-monitor/config.json or $XDG_CONFIG_HOME)."
+        }
+      }
+    }
   },
   "files": [
     "config/default.json",
@@ -34,7 +60,8 @@
     "web/vendor/"
   ],
   "engines": {
-    "node": ">=22.12"
+    "node": ">=22.13",
+    "vscode": "^1.108.0"
   },
   "scripts": {
     "build": "tsc",
@@ -45,6 +72,7 @@
   },
   "devDependencies": {
     "@types/node": "26.6.6",
+    "@types/vscode": "1.108.0",
     "typescript": "7.0.2"
   }
 }

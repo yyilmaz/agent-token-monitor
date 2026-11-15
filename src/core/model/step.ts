@@ -5,6 +5,8 @@ import type { Call, StepClass } from "./index.js";
 
 /** Named tools that write files. */
 export const EDIT_TOOLS: ReadonlySet<string> = new Set([
+  "edit",
+  "write",
   "edit_file",
   "write_file",
   "replace_file_content",
@@ -18,6 +20,10 @@ export const EDIT_TOOLS: ReadonlySet<string> = new Set([
 
 /** Named tools that read or search. */
 export const EXPLORE_TOOLS: ReadonlySet<string> = new Set([
+  "read",
+  "glob",
+  "webfetch",
+  "websearch",
   "read_file",
   "view_file",
   "view_file_outline",

@@ -17,6 +17,7 @@ import {
   readClaudeCodeFile,
 } from "../../core/adapters/claude-code/index.js";
 import { CODEX_FILE_PATTERN, combineCodex, readCodexFile } from "../../core/adapters/codex/index.js";
+import { OPENCODE_FILE_PATTERN, combineOpenCode, readOpenCodeFile } from "../../core/adapters/opencode/index.js";
 import { type Analysis, analyze, type HarnessSource } from "../../core/api/index.js";
 import { HARNESS_KEYS } from "../../core/config/schema.js";
 import type { Config, ConfigError } from "../../core/config/config.js";
@@ -43,9 +44,7 @@ interface Adapter {
  * Harnesses without an adapter yet (Phase 2, R-21): the files that show one is in use. Only listed, never read, so the
  * dashboard can say "found, not read yet" instead of staying silent about them (R-23).
  */
-const DETECT: Readonly<Partial<Record<HarnessId, RegExp>>> = {
-  opencode: /^opencode\.db$/,
-};
+const DETECT: Readonly<Partial<Record<HarnessId, RegExp>>> = {};
 
 /** Adapters registered with the incremental store (R-21, ADR 0014). */
 const ADAPTERS: readonly Adapter[] = [
@@ -58,6 +57,7 @@ const ADAPTERS: readonly Adapter[] = [
     combine: combineClaudeCode,
   },
   { harness: "codex", pattern: CODEX_FILE_PATTERN, indexPattern: null, readFile: readCodexFile, combine: combineCodex },
+  { harness: "opencode", pattern: OPENCODE_FILE_PATTERN, indexPattern: null, readFile: readOpenCodeFile, combine: combineOpenCode },
 ];
 
 interface CachedFile {

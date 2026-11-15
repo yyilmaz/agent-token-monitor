@@ -4,7 +4,7 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "lib": ["es2023", "dom"],
-    "types": ["node"],
+    "types": ["node", "vscode"],
     "rootDir": ".",
     "outDir": "dist",
     "strict": true,

@@ -6,6 +6,9 @@ import { join, relative, sep } from "node:path";
 
 import type { LogFile, LogSource } from "../../core/host/index.js";
 import { compareStrings } from "../../core/order.js";
+import { readOpenCodeSqliteLines } from "./opencode-sqlite.js";
+
+const SQLITE_DB_FILE = /(?:^|\/)opencode\.db$/;
 
 export class FsLogSource implements LogSource {
   /** @param roots log root key (e.g. "claudeCode:0") → absolute directory */
@@ -27,14 +30,21 @@ export class FsLogSource implements LogSource {
   }
 
   async read(logRoot: string, file: string): Promise<LogFile> {
-    const text = await readFile(join(this.rootDir(logRoot), ...file.split("/")), "utf8");
+    const fullPath = join(this.rootDir(logRoot), ...file.split("/"));
+    if (SQLITE_DB_FILE.test(file)) {
+      return { logRoot, file, lines: await readOpenCodeSqliteLines(fullPath) };
+    }
+    const text = await readFile(fullPath, "utf8");
     return { logRoot, file, lines: text.split(/\r?\n/) };
   }
 
   /** Size and modification time of one file, used to notice changes without reading it (ADR 0013). */
   async fingerprint(logRoot: string, file: string): Promise<string> {
-    const info = await stat(join(this.rootDir(logRoot), ...file.split("/")));
-    return `${info.size}:${info.mtimeMs}`;
+    const fullPath = join(this.rootDir(logRoot), ...file.split("/"));
+    const info = await stat(fullPath);
+    const base = `${info.size}:${info.mtimeMs}`;
+    if (!SQLITE_DB_FILE.test(file)) return base;
+    return `${base}|${await optionalStamp(`${fullPath}-wal`)}`;
   }
 
   private rootDir(logRoot: string): string {
@@ -62,4 +72,14 @@ export async function readLogFiles(source: LogSource, logRoots: readonly string[
 
 function isMissing(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT";
+}
+
+async function optionalStamp(path: string): Promise<string> {
+  try {
+    const info = await stat(path);
+    return `${info.size}:${info.mtimeMs}`;
+  } catch (error) {
+    if (isMissing(error)) return "missing";
+    throw error;
+  }
 }

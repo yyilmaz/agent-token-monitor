@@ -15,7 +15,7 @@ The user file is looked up in this order:
 2. `$XDG_CONFIG_HOME/agent-token-monitor/config.json`, when `XDG_CONFIG_HOME` is set to an absolute path;
 3. `~/.config/agent-token-monitor/config.json`.
 
-If no user file exists, the defaults apply. The tool never creates or rewrites it. Inside VS Code, the setting `agentTokenMonitor.configPath` will select the file; when empty, the same default path is used.
+If no user file exists, the defaults apply. The tool never creates or rewrites it. Inside VS Code, the setting `agentTokenMonitor.configPath` selects the file (expanding leading `~` and resolving relative paths against the first open workspace folder); when empty, the same default path is used.
 
 ## Rules
 
@@ -52,7 +52,7 @@ Where each harness writes its logs (R-24). Each is an array of directory paths; 
 | `logRoots.claudeCode` | `["~/.claude/projects"]` | |
 | `logRoots.antigravity` | `["~/.gemini/antigravity/brain"]` | |
 | `logRoots.codex` | `["~/.codex/sessions"]` | Reads `rollout-*.jsonl` files recursively. For a custom Codex home, point this at its `sessions` directory. Add `~/.codex/archived_sessions` to include archived rollouts ([ADR 0018](adr/0018-codex-adapter.md)). |
-| `logRoots.opencode` | `["~/.local/share/opencode"]` (Linux also checks `$XDG_DATA_HOME/opencode`; Windows checks `%LOCALAPPDATA%/opencode` and `~/.local/share/opencode`) | Phase 2 (R-21). Until its adapter exists, only the presence of `opencode.db` is checked; the database is never opened (R-15) |
+| `logRoots.opencode` | `["~/.local/share/opencode"]` (Linux also checks `$XDG_DATA_HOME/opencode`; Windows checks `%LOCALAPPDATA%/opencode` and `~/.local/share/opencode`) | R-21, [ADR 0022](adr/0022-opencode-adapter.md). `opencode.db` is read from a temporary copy outside the harness root; the original is never opened (R-15) |
 
 ### `sessionIndexRoots`
 

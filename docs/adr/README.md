@@ -54,3 +54,6 @@ What becomes easier, harder or constrained as a result.
 | [0018](0018-codex-adapter.md) | Codex rollout adapter | Accepted |
 | [0019](0019-bootstrap-navbar-and-color-modes.md) | Bootstrap 6 dashboard presentation | Accepted |
 | [0020](0020-harness-and-model-badges.md) | Harness and model badges | Accepted |
+| [0021](0021-vscode-extension.md) | Native VS Code extension host | Accepted |
+| [0022](0022-opencode-adapter.md) | OpenCode SQLite adapter | Accepted |
+| [0023](0023-html-report-export.md) | Self-contained HTML report export | Accepted |
