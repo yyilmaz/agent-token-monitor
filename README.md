@@ -78,7 +78,7 @@ The server binds to `127.0.0.1` only and rejects requests with any other `Host` 
 
 ## Dashboard tour
 
-The local HTML dashboard refreshes automatically, works completely offline, follows your system light/dark theme (with a navbar toggle), and remembers column visibility preferences in your browser ([ADR 0019](docs/adr/0019-bootstrap-navbar-and-color-modes.md)).
+The local HTML dashboard refreshes automatically, works completely offline, follows your system light/dark theme (with a navbar toggle), remembers column visibility preferences in your browser ([ADR 0019](docs/adr/0019-bootstrap-navbar-and-color-modes.md)), and can export a self-contained offline HTML snapshot via the navbar **Export** button (`GET /api/report`, [ADR 0023](docs/adr/0023-html-report-export.md)).
 
 ### Now — Open sessions & live advice
 
@@ -168,12 +168,7 @@ A call is a **full cache miss** when it reads `0` from cache above `fullMissMinC
 
 ## Roadmap & out of scope
 
-**Shipped:** Antigravity, Claude Code, and Codex adapters · live `Now` view with `ADVICE-1` & `WORKFLOW-1` · `Usage` & `Cache` views · session drill-down · `--status` JSON CLI · diagnostics.
-
-**Planned:**
-- OpenCode strictly read-only SQLite adapter (R-21)
-- Self-contained HTML report export (R-71, [ADR 0002](docs/adr/0002-architecture-and-boundaries.md))
-- Native VS Code extension host packaging (R-26)
+**Shipped:** Antigravity, Claude Code, Codex, and OpenCode ([ADR 0022](docs/adr/0022-opencode-adapter.md)) adapters · live `Now` view with `ADVICE-1` & `WORKFLOW-1` · `Usage` & `Cache` views · session drill-down · self-contained HTML report export (`GET /api/report`, [ADR 0023](docs/adr/0023-html-report-export.md)) · `--status` JSON CLI · diagnostics · native VS Code extension (`Agent Token Monitor: Open Dashboard`, `agentTokenMonitor.configPath`, [ADR 0021](docs/adr/0021-vscode-extension.md)).
 
 **Intentionally out of scope:**
 - **Controlling agents:** This is a pure observer. It never modifies settings, triggers `/compact`, or alters agent behavior.

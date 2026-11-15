@@ -15,7 +15,7 @@ The user file is looked up in this order:
 2. `$XDG_CONFIG_HOME/agent-token-monitor/config.json`, when `XDG_CONFIG_HOME` is set to an absolute path;
 3. `~/.config/agent-token-monitor/config.json`.
 
-If no user file exists, the defaults apply. The tool never creates or rewrites it. Inside VS Code, the setting `agentTokenMonitor.configPath` will select the file; when empty, the same default path is used.
+If no user file exists, the defaults apply. The tool never creates or rewrites it. Inside VS Code, the setting `agentTokenMonitor.configPath` selects the file (expanding leading `~` and resolving relative paths against the first open workspace folder); when empty, the same default path is used.
 
 ## Rules
 

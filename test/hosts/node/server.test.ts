@@ -10,6 +10,7 @@ import { join } from "node:path";
 import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import { after, before, describe, it } from "node:test";
+import vm from "node:vm";
 
 import { defaultConfigPath } from "../../../src/hosts/node/config.js";
 import { portArgument } from "../../../src/hosts/node/main.js";
@@ -19,13 +20,20 @@ import { AnalysisStore } from "../../../src/hosts/node/store.js";
 const FIXTURES = fileURLToPath(new URL("../../../../test/fixtures", import.meta.url));
 const NOW = Date.parse("2026-10-31T12:00:00.000Z");
 
-function get(port: number, path: string, options: { host?: string; method?: string } = {}): Promise<{ status: number; type: string; body: string }> {
+function get(port: number, path: string, options: { host?: string; method?: string } = {}): Promise<{ status: number; type: string; disposition: string | undefined; body: string }> {
   return new Promise((resolve, reject) => {
     const req = request({ host: "127.0.0.1", port, path, method: options.method ?? "GET", headers: { Host: options.host ?? `127.0.0.1:${port}` } }, (res) => {
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (chunk: string) => (body += chunk));
-      res.on("end", () => resolve({ status: res.statusCode ?? 0, type: String(res.headers["content-type"]), body }));
+      res.on("end", () =>
+        resolve({
+          status: res.statusCode ?? 0,
+          type: String(res.headers["content-type"]),
+          disposition: res.headers["content-disposition"],
+          body,
+        }),
+      );
     });
     req.on("error", reject);
     req.end();
@@ -158,6 +166,35 @@ describe("standalone server", () => {
     assert.equal(one.session.id, id);
     assert.ok(one.calls.length > 0);
     assert.equal((await get(ctx.port, "/api/sessions/none")).status, 404);
+  });
+
+  it("exports a deterministic, self-contained HTML report at GET /api/report (R-10, R-14, R-71, ADR 0023)", async () => {
+    const page = await get(ctx.port, "/");
+    assert.match(page.body, /href="api\/report"\s+download="agent-token-monitor-report\.html"/);
+
+    const r1 = await get(ctx.port, "/api/report");
+    const r2 = await get(ctx.port, "/api/report");
+    assert.equal(r1.status, 200);
+    assert.match(r1.type, /^text\/html/);
+    assert.equal(r1.disposition, 'attachment; filename="agent-token-monitor-report.html"');
+    assert.equal(r1.body, r2.body, "report export must be byte-identical for identical inputs and asOf");
+
+    assert.doesNotMatch(r1.body, /<link\s+rel="stylesheet"/i);
+    assert.doesNotMatch(r1.body, /<script[^>]*\bsrc=/i);
+    assert.doesNotMatch(r1.body, /"(pricing|currency|cost)"\s*:/);
+    assert.match(r1.body, /<meta http-equiv="Content-Security-Policy"/);
+
+    const dataMatch = /<script type="application\/json" id="report-data">([\s\S]*?)<\/script>/.exec(r1.body);
+    assert.ok(dataMatch, "report must embed #report-data JSON");
+    const report = JSON.parse(dataMatch[1] as string) as import("../../../src/core/api/report.js").ReportData;
+    assert.equal(report.asOf, NOW);
+    assert.equal(report.timeZone, "UTC");
+    assert.ok(report.configuration);
+    assert.ok(Object.keys(report.sessions).length > 0);
+
+    const scriptMatch = /<script>\n([\s\S]*?)\n<\/script>\s*<\/body>/.exec(r1.body);
+    assert.ok(scriptMatch, "report must inline bundled scripts before </body>");
+    assert.doesNotThrow(() => new vm.Script(scriptMatch[1] as string));
   });
 });
 

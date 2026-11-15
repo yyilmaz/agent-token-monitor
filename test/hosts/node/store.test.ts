@@ -101,7 +101,7 @@ describe("harness sources (R-20, R-21, R-23)", () => {
       ["claudeCode", true, "found"],
       ["antigravity", true, "none"],
       ["codex", true, "found"],
-      ["opencode", false, "found"],
+      ["opencode", true, "found"],
     ]);
     assert.equal(state.analysis.sources.find((s) => s.harness === "codex")?.files, 2);
   });

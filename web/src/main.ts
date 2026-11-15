@@ -1,7 +1,7 @@
 // Dashboard entry: tab routing by URL hash and polling of the visible view only (ADR 0005, ADR 0013).
 
 import type * as api from "../../src/core/api/index.js";
-import { ConfigErrors, getJson } from "./data.js";
+import { ConfigErrors, getJson, isOfflineReport, onHostRefresh } from "./data.js";
 import { h, table } from "./dom.js";
 import { sweepCharts } from "./chart.js";
 import { renderCache } from "./views/cache.js";
@@ -118,7 +118,9 @@ async function refresh(): Promise<void> {
     interval = data.configuration.ui.pollIntervalSeconds;
     diagnosticsCount = data.diagnosticCount;
     renderDiagnosticsTab();
-    status.textContent = `Updated ${new Date(data.asOf).toLocaleTimeString()}`;
+    status.textContent = isOfflineReport()
+      ? `Exported report (${new Date(data.asOf).toLocaleString()})`
+      : `Updated ${new Date(data.asOf).toLocaleTimeString()}`;
     status.classList.remove("error");
   } catch (error) {
     if (mine !== generation) return;
@@ -138,7 +140,9 @@ async function refresh(): Promise<void> {
     status.textContent = error instanceof ConfigErrors ? "Configuration error" : `Cannot reach the server: ${error instanceof Error ? error.message : String(error)}`;
     status.classList.add("error");
   }
-  timer = window.setTimeout(() => void refresh(), interval * 1000);
+  if (!isOfflineReport()) {
+    timer = window.setTimeout(() => void refresh(), interval * 1000);
+  }
 }
 
 function renderTabs(): void {
@@ -190,8 +194,15 @@ try {
   // Storage can be restricted by the host.
 }
 
+function isVsCodeDark(): boolean | null {
+  const { classList } = document.body;
+  if (classList.contains("vscode-dark") || classList.contains("vscode-high-contrast")) return true;
+  if (classList.contains("vscode-light") || classList.contains("vscode-high-contrast-light")) return false;
+  return null;
+}
+
 function applyTheme(): void {
-  const dark = theme === "dark" || (theme === null && systemTheme.matches);
+  const dark = theme === "dark" || (theme === null && (isVsCodeDark() ?? systemTheme.matches));
   document.documentElement.dataset.bsTheme = dark ? "dark" : "light";
   themeToggle.setAttribute("aria-pressed", String(dark));
   themeToggle.title = dark ? "Switch to light theme" : "Switch to dark theme";
@@ -208,10 +219,18 @@ themeToggle.addEventListener("click", () => {
   if (route().tab === "usage") void refresh();
 });
 systemTheme.addEventListener("change", () => {
-  if (theme !== null) return;
+  if (theme !== null || isVsCodeDark() !== null) return;
   applyTheme();
   if (route().tab === "usage") void refresh();
 });
+if (typeof MutationObserver === "function") {
+  new MutationObserver(() => {
+    if (theme !== null || isVsCodeDark() === null) return;
+    applyTheme();
+    if (route().tab === "usage") void refresh();
+  }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+}
+onHostRefresh(() => void refresh());
 applyTheme();
 
 window.addEventListener("hashchange", () => {
@@ -220,6 +239,9 @@ window.addEventListener("hashchange", () => {
   window.scrollTo(0, 0);
   void refresh();
 });
+
+const exportLink = document.getElementById("export-report");
+if (exportLink !== null && isOfflineReport()) exportLink.hidden = true;
 
 renderTabs();
 void refresh();

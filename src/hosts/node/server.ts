@@ -1,12 +1,13 @@
 // Standalone host: HTTP server on 127.0.0.1 that serves the dashboard files and the data API (ADR 0002, 0005, 0013).
 // GET only; requests for any other Host are refused, so a web page cannot reach the API by DNS rebinding (R-14).
 
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { extname, join } from "node:path";
 
 import * as api from "../../core/api/index.js";
+import { buildHtmlReport, buildReportData, REPORT_FILENAME, type ReportAssets } from "../../core/api/report.js";
 import { stableStringify } from "../../core/config/config.js";
 import type { AnalysisStore } from "./store.js";
 
@@ -71,26 +72,47 @@ async function handle(request: IncomingMessage, response: ServerResponse, option
   send(response, 404, "text/plain; charset=utf-8", "not found");
 }
 
-async function answerApi(url: URL, response: ServerResponse, options: ServerOptions): Promise<void> {
-  const now = options.now();
-  const state = await options.store.current(now);
-  if (!state.ok) return sendJson(response, 200, api.configErrorResponse(state.errors));
+export interface ApiResponse {
+  readonly status: number;
+  readonly body: unknown;
+}
+
+/** Shared `/api/*` router used by both the HTTP server and the VS Code Webview host (ADR 0013, ADR 0021). */
+export async function dispatchApi(endpoint: string, store: AnalysisStore, nowFn: () => number): Promise<ApiResponse> {
+  const url = new URL(endpoint, "http://127.0.0.1");
+  if (!url.pathname.startsWith("/api/")) return { status: 404, body: { error: "unknown endpoint" } };
+  const now = nowFn();
+  const state = await store.current(now);
+  if (!state.ok) return { status: 200, body: api.configErrorResponse(state.errors) };
   const analysis = state.analysis;
   const route = url.pathname.slice("/api/".length);
 
-  if (route === "overview") return sendJson(response, 200, api.overview(analysis, now));
+  if (route === "overview") return { status: 200, body: api.overview(analysis, now) };
   if (route === "usage") {
     const by = url.searchParams.get("by") ?? "day";
-    if (by !== "day" && by !== "month" && by !== "session") return sendJson(response, 400, { error: "by must be day, month or session" });
-    return sendJson(response, 200, api.usage(analysis, now, by));
+    if (by !== "day" && by !== "month" && by !== "session") {
+      return { status: 400, body: { error: "by must be day, month or session" } };
+    }
+    return { status: 200, body: api.usage(analysis, now, by) };
   }
-  if (route === "cache") return sendJson(response, 200, api.cache(analysis, now));
-  if (route === "diagnostics") return sendJson(response, 200, api.diagnostics(analysis, now));
+  if (route === "cache") return { status: 200, body: api.cache(analysis, now) };
+  if (route === "diagnostics") return { status: 200, body: api.diagnostics(analysis, now) };
   if (route.startsWith("sessions/")) {
     const result = api.session(analysis, now, decodeURIComponent(route.slice("sessions/".length)));
-    return result === null ? sendJson(response, 404, { error: "unknown session" }) : sendJson(response, 200, result);
+    return result === null ? { status: 404, body: { error: "unknown session" } } : { status: 200, body: result };
   }
-  sendJson(response, 404, { error: "unknown endpoint" });
+  return { status: 404, body: { error: "unknown endpoint" } };
+}
+
+async function answerApi(url: URL, response: ServerResponse, options: ServerOptions): Promise<void> {
+  if (url.pathname === "/api/report") {
+    const now = options.now();
+    const state = await options.store.current(now);
+    if (!state.ok) return sendJson(response, 200, api.configErrorResponse(state.errors));
+    return sendReport(response, state.analysis, now, options);
+  }
+  const { status, body } = await dispatchApi(url.pathname + url.search, options.store, options.now);
+  sendJson(response, status, body);
 }
 
 async function sendFile(response: ServerResponse, path: string): Promise<void> {
@@ -108,7 +130,48 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
   send(response, status, "application/json; charset=utf-8", stableStringify(value));
 }
 
-function send(response: ServerResponse, status: number, type: string, body: string | Buffer): void {
-  response.writeHead(status, { ...SECURITY_HEADERS, "Content-Type": type });
+function send(response: ServerResponse, status: number, type: string, body: string | Buffer, extraHeaders: Readonly<Record<string, string>> = {}): void {
+  response.writeHead(status, { ...SECURITY_HEADERS, "Content-Type": type, ...extraHeaders });
   response.end(body);
+}
+
+async function sendReport(response: ServerResponse, analysis: api.Analysis, now: number, options: ServerOptions): Promise<void> {
+  const assets = await readReportAssets(options);
+  const html = buildHtmlReport(buildReportData(analysis, now), assets);
+  send(response, 200, CONTENT_TYPES[".html"] as string, html, {
+    "Content-Disposition": `attachment; filename="${REPORT_FILENAME}"`,
+  });
+}
+
+async function readReportAssets(options: ServerOptions): Promise<ReportAssets> {
+  const [indexHtml, bootstrapCss, uplotCss, appCss, uplotJs] = await Promise.all([
+    readFile(join(options.staticDir, "index.html"), "utf8"),
+    readFile(join(options.vendorDir, "bootstrap", "bootstrap.min.css"), "utf8"),
+    readFile(join(options.vendorDir, "uplot", "uPlot.min.css"), "utf8"),
+    readFile(join(options.staticDir, "style.css"), "utf8"),
+    readFile(join(options.vendorDir, "uplot", "uPlot.iife.min.js"), "utf8"),
+  ]);
+  const modules: Record<string, string> = {};
+  await collectJsModules(join(options.vendorDir, "bootstrap", "js"), "vendor/bootstrap/js", modules);
+  await collectJsModules(options.scriptDir, "js", modules);
+  return {
+    indexHtml,
+    stylesheets: [bootstrapCss, uplotCss, appCss],
+    classicScripts: [uplotJs],
+    modules,
+    entryModules: ["vendor/bootstrap/js/drawer.js", "js/main.js"],
+  };
+}
+
+async function collectJsModules(dir: string, prefix: string, out: Record<string, string>): Promise<void> {
+  const entries = (await readdir(dir, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const entry of entries) {
+    const full = join(dir, entry.name);
+    const key = `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) {
+      await collectJsModules(full, key, out);
+    } else if (entry.name.endsWith(".js")) {
+      out[key] = await readFile(full, "utf8");
+    }
+  }
 }
