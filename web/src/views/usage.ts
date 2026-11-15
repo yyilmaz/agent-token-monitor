@@ -256,7 +256,7 @@ function where(periods: readonly UsagePeriod[], state: UsageState, onChange: (ne
   const sums = new Map<string, { tokens: number; harness: string | null }>();
   for (const p of periods) {
     for (const s of state.where === "harness" ? p.byHarness : state.where === "project" ? p.byProject : p.byModel) {
-      const label = state.where === "harness" ? f.harness(s.harness) : state.where === "project" ? f.repository(s.project) : `${f.harness(s.harness)} · ${f.model(s.model, s.modelSource)}`;
+      const label = state.where === "harness" ? f.harness(s.harness) : state.where === "project" ? f.repository(s.project) : `${f.harness(s.harness)} · ${f.model(s.model, s.modelSource, s.harness)}`;
       const entry = sums.get(label) ?? { tokens: 0, harness: state.where === "harness" ? s.harness : null };
       entry.tokens += all(s.figures);
       sums.set(label, entry);
@@ -286,13 +286,16 @@ function where(periods: readonly UsagePeriod[], state: UsageState, onChange: (ne
           "div",
           { class: "card p-5 shares" },
           rows.flatMap((r) => [
-            h("span", { class: "share-label" }, r.label),
+            h("span", { class: "share-label", ...(r.label.includes(f.UNKNOWN_GEMINI_MODEL_LABEL) ? { title: f.UNKNOWN_GEMINI_MODEL_NOTE } : {}) }, r.label),
             // By harness, each bar wears its harness's chart color; otherwise the one default series color.
             h("progress", { class: r.harness === null ? "progress share" : `progress share ${HARNESS_COLOR[r.harness]?.slice(2) ?? ""}`, value: String(r.tokens), max: String(total || 1) }),
             h("span", { class: "num" }, share(r.tokens, total)),
             h("span", { class: "num", title: `${f.tokens(r.tokens)} tokens` }, f.compactTokens(r.tokens)),
           ]),
         ),
+    state.where === "model" && rows.some((r) => r.label.includes(f.UNKNOWN_GEMINI_MODEL_LABEL))
+      ? h("p", { class: "muted small mt-2" }, f.UNKNOWN_GEMINI_MODEL_NOTE)
+      : null,
   );
 }
 

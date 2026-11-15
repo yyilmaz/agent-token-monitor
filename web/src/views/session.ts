@@ -69,7 +69,7 @@ export function renderSession(data: SessionData): HTMLElement {
   const newestFirstCalls = [...data.calls].reverse();
 
   const displayTitle = s.title ?? (s.projectPath !== null ? f.project(s.projectPath) : f.shortSessionId(s.id, s.isSubagent));
-  const sessionModel = turnRows[0] === undefined ? null : f.model(turnRows[0].model, turnRows[0].modelSource);
+  const sessionModel = turnRows[0] === undefined ? null : f.model(turnRows[0].model, turnRows[0].modelSource, s.harness);
 
   const trajectoryHost = h("div", {});
   const toggleHint = h("span", { class: "expand-hint" }, trajectoryExpanded ? "⤡ Hide chart" : "⤢ Expand chart");
@@ -121,7 +121,10 @@ export function renderSession(data: SessionData): HTMLElement {
     h("h2", {}, displayTitle),
     h(
       "p",
-      { class: "muted small" },
+      {
+        class: "muted small",
+        ...(sessionModel === f.UNKNOWN_GEMINI_MODEL_LABEL ? { title: f.UNKNOWN_GEMINI_MODEL_NOTE } : {}),
+      },
       `${f.harness(s.harness)}${sessionModel === null ? "" : ` · ${sessionModel}`} · ${s.id}`,
       s.projectPath === null ? null : ` · project: ${s.projectPath}`,
       s.parentSessionId === null
@@ -131,6 +134,7 @@ export function renderSession(data: SessionData): HTMLElement {
         ? null
         : h("span", {}, " · started by ", sessionLink(s.spawnedBySessionId, data.titles[s.spawnedBySessionId] ?? f.shortSessionId(s.spawnedBySessionId))),
     ),
+    sessionModel === f.UNKNOWN_GEMINI_MODEL_LABEL ? h("p", { class: "muted small" }, f.UNKNOWN_GEMINI_MODEL_NOTE) : null,
     data.sideSessions.length > 0
       ? h(
           "p",

@@ -154,7 +154,7 @@ export function renderNow(data: Overview, state: NowState, onChange: (next: NowS
         },
         { title: "Cache", cell: (r) => cacheCell(r) },
         // ADR 0017: keep going, compact now or start fresh; detailed breakdown opens in the drawer.
-        { title: "Advice", cell: (r) => adviceTag(adviceById.get(r.sessionId), openAdviceDrawer) },
+        { title: "Advice", cell: (r) => adviceCell(r, adviceById.get(r.sessionId), data.sessionLoads[r.sessionId], openAdviceDrawer) },
       ],
       rows,
       state.harness || state.project
@@ -163,6 +163,9 @@ export function renderNow(data: Overview, state: NowState, onChange: (next: NowS
       undefined,
       "open-sessions",
     ),
+    rows.some((r) => sessionModelText(r, adviceById.get(r.sessionId)) === f.UNKNOWN_GEMINI_MODEL_LABEL)
+      ? h("p", { class: "muted small mt-2" }, f.UNKNOWN_GEMINI_MODEL_NOTE)
+      : null,
   );
 }
 
@@ -226,17 +229,20 @@ function filterTree(tree: readonly TreeRow[], state: NowState): TreeRow[] {
   return tree.filter((_, i) => keep.has(i));
 }
 
+function sessionModelText(r: TreeRow, adv: SessionAdvice | undefined): string {
+  return r.open !== null
+    ? f.model(r.open.model, r.open.modelSource, r.harness)
+    : adv !== undefined && adv.model !== null
+      ? f.model(adv.model, adv.modelSource, r.harness)
+      : "";
+}
+
 /** The title, else the project folder or short session ID, with harness and model metadata underneath (TREE-1, ADR 0016). */
 function sessionCell(r: TreeRow, adv: SessionAdvice | undefined): HTMLElement {
   const isSubagent = r.relation === "subagent";
   const hasName = r.title !== null || r.project !== null;
   const name = sessionDisplayName(r);
-  const modelText =
-    r.open !== null
-      ? f.model(r.open.model, r.open.modelSource)
-      : adv !== undefined && adv.model !== null
-        ? f.model(adv.model, adv.modelSource)
-        : "";
+  const modelText = sessionModelText(r, adv);
   const metaParts = [
     r.title !== null && r.project !== null ? f.project(r.project) : "",
     f.harness(r.harness),
@@ -255,7 +261,16 @@ function sessionCell(r: TreeRow, adv: SessionAdvice | undefined): HTMLElement {
         ? null
         : h("span", { class: "muted small" }, isSubagent ? " · subagent" : " · side session"),
     ),
-    metaParts.length === 0 ? null : h("div", { class: "muted small session-meta" }, metaParts.join(" · ")),
+    metaParts.length === 0
+      ? null
+      : h(
+          "div",
+          {
+            class: "muted small session-meta",
+            ...(modelText === f.UNKNOWN_GEMINI_MODEL_LABEL ? { title: f.UNKNOWN_GEMINI_MODEL_NOTE } : {}),
+          },
+          metaParts.join(" · "),
+        ),
   );
 }
 
@@ -297,6 +312,28 @@ function cacheCell(r: TreeRow): HTMLElement {
     h("span", { class: `badge ${tone}`, title: `LIVE-1 · reference lifetime ${f.duration(s.referenceLifetimeSeconds)} (${s.referenceSource})` }, text),
     h("div", { class: "muted small mt-1", title: "Time since last call" }, `${f.duration(s.secondsSinceLastCall)} ago`),
   );
+}
+
+/** Subagents receive no advice verdict (ADR 0017 A10); show their STEP-1 activity summary as detail. */
+function adviceCell(
+  r: TreeRow,
+  adv: SessionAdvice | undefined,
+  load: SessionLoad | undefined,
+  onWhy: (advice: SessionAdvice) => void,
+): HTMLElement {
+  if (adv !== undefined || r.relation !== "subagent") return adviceTag(adv, onWhy);
+  return subagentActivity(load);
+}
+
+function subagentActivity(load: SessionLoad | undefined): HTMLElement {
+  if (load === undefined || (load.totalTurns === 0 && load.compactions === 0)) return h("span", { class: "muted" }, "");
+  const parts: string[] = [
+    load.activeTurns === 0 && load.compactions > 0
+      ? "just compacted"
+      : `${load.activeTurns} ${f.plural(load.activeTurns, "turn")} (${load.editTurns} edit, ${load.exploreTurns} explore, ${load.otherTurns} other)`,
+  ];
+  if (load.lastToolNames.length > 0) parts.push(`last: ${load.lastToolNames.join(", ")}`);
+  return h("div", { class: "advice-wrap" }, h("div", { class: "muted small advice-summary" }, parts.join(" · ")));
 }
 
 /** R-23: problems grouped by kind, most serious and most frequent first, with what each does to the figures. */

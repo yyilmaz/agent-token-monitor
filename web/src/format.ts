@@ -53,7 +53,14 @@ export function time(epochMillis: number, timeZone: string): string {
   return new Intl.DateTimeFormat("en-GB", { timeZone, dateStyle: "short", timeStyle: "medium" }).format(epochMillis);
 }
 
-export function model(name: string | null, source: string | null): string {
+export const UNKNOWN_GEMINI_MODEL_LABEL = "unknown gemini model*";
+export const UNKNOWN_GEMINI_MODEL_NOTE =
+  "* Cannot be shown because this information does not exist in the Antigravity harness.";
+
+export function model(name: string | null, source: string | null, harness?: string | null): string {
+  if (harness === "antigravity" && (name === null || source === "assumed")) {
+    return UNKNOWN_GEMINI_MODEL_LABEL;
+  }
   if (name === null) return "unknown model";
   return source === "assumed" ? `${name} (assumed)` : name;
 }

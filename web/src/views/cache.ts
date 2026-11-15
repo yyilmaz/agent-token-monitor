@@ -21,6 +21,9 @@ export function renderCache(data: Cache): HTMLElement {
       "After a pause, the agent either still finds its cache or must re-read the conversation without it. These numbers come from the pauses in your own logs, measured apart for each lifetime the harness promised.",
     ),
     data.lifetimes.length === 0 ? h("p", { class: "muted" }, "No pauses observed yet.") : h("div", { class: "cards d-grid gap-5" }, data.lifetimes.map(lifetimeCard)),
+    data.lifetimes.some((g) => f.model(g.model, g.modelSource, g.harness) === f.UNKNOWN_GEMINI_MODEL_LABEL)
+      ? h("p", { class: "muted small mt-2" }, f.UNKNOWN_GEMINI_MODEL_NOTE)
+      : null,
     h("h2", {}, "Why was the cache lost?"),
     causes(data.causes),
   );
@@ -28,10 +31,15 @@ export function renderCache(data: Cache): HTMLElement {
 
 function lifetimeCard(g: LifetimeGroup): HTMLElement {
   const pauses = g.survived + g.gone;
+  const modelLabel = f.model(g.model, g.modelSource, g.harness);
   return h(
     "div",
     { class: "card p-5" },
-    h("div", { class: "label" }, `${f.harness(g.harness)} · ${f.model(g.model, g.modelSource)}`),
+    h(
+      "div",
+      { class: "label", ...(modelLabel === f.UNKNOWN_GEMINI_MODEL_LABEL ? { title: f.UNKNOWN_GEMINI_MODEL_NOTE } : {}) },
+      `${f.harness(g.harness)} · ${modelLabel}`,
+    ),
     h(
       "div",
       { class: "small mt-2 mb-1", title: "DECL-1 · the lifetime the harness's logs declared for the cache before each pause" },
