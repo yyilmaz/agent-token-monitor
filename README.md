@@ -119,7 +119,7 @@ Each adapter normalizes a harness's native logs into a single shared model and i
 | **Antigravity** (2.0 app) | Supported | `~/.gemini/antigravity/brain/<id>/.system_generated/logs/transcript.jsonl` | Titles from `annotations/<id>.pbtxt`; model & `/compact` tokens are `unknown` |
 | **Claude Code** | Supported | `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl` | Deduplicates streamed `requestId` lines and forked sessions; tracks 5m/1h cache writes |
 | **Codex** | Supported | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | Normalizes `input_tokens` (which includes cached tokens); retains logged quota samples |
-| **OpenCode** | Planned | `~/.local/share/opencode/opencode.db` | SQLite store; requires strictly read-only access without touching `-wal`/`-shm` (R-15) |
+| **OpenCode** | Supported | `~/.local/share/opencode/opencode.db` | SQLite store read strictly read-only from a temporary copy of the database and its `-wal`/`-shm` sidecars (R-15, [ADR 0022](docs/adr/0022-opencode-adapter.md)) |
 
 <details>
 <summary>Adapter normalization details &amp; per-call field semantics</summary>
@@ -129,7 +129,7 @@ Field semantics differ significantly between harnesses. Adapters normalize these
 - **Antigravity:** Each `PLANNER_RESPONSE` step is one request. `input_tokens` represents uncached prompt tokens, and there is no cache-write field, so cache writes are recorded as `0`. Model name and thinking tokens are not logged (`unknown`). `/compact` writes a `CHECKPOINT` step with no token counts (`unknown`). Subagents are separate conversations linked by `.system_generated/subagents/<child-id>.json`. Other Antigravity log directories can be added via `logRoots.antigravity`.
 - **Claude Code:** One request is written across multiple streaming lines sharing a `requestId`; the adapter counts it once (taking the largest output). `input_tokens` already excludes cached tokens. `cache_creation_input_tokens` splits 5m (`300s`) and 1h (`3600s`) ephemeral writes. Subagents live under `<session-id>/subagents/agent-<id>.jsonl`. Compaction (`compact_boundary`) does not log its summarization tokens (`unknown`).
 - **Codex:** Counts each `token_usage_record` once and supports older `token_count` snapshots ([ADR 0018](docs/adr/0018-codex-adapter.md)). Codex's `input_tokens` **includes** cached tokens, so the adapter subtracts `cached_input_tokens` and `cache_write_input_tokens` to compute `input_uncached`. Logged rate limits are preserved as quota samples.
-- **OpenCode:** Currently checks for the presence of `opencode.db` only and never opens it, because opening SQLite normally can create or modify `-wal` / `-shm` sidecar files in the harness directory, which violates the read-only rule (R-15).
+- **OpenCode:** Never opens `opencode.db` in place, because opening SQLite normally can create or modify `-wal` / `-shm` sidecar files in the harness directory (R-15). The host copies the database and any sidecars to a temporary directory outside the harness root, reads structural columns only with `node:sqlite`, and deletes the copy afterwards ([ADR 0022](docs/adr/0022-opencode-adapter.md)).
 
 </details>
 

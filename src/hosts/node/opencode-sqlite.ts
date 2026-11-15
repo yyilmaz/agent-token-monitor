@@ -5,7 +5,9 @@
 import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
+
+type SqliteModule = { readonly DatabaseSync: typeof DatabaseSyncType };
 
 const SHELL_TOOLS: ReadonlySet<string> = new Set(["shell", "bash"]);
 
@@ -104,7 +106,31 @@ function sanitizeMessageData(rawJson: string): {
   };
 }
 
-function readFromCopiedDb(copyPath: string): string[] {
+let sqliteModule: Promise<SqliteModule> | null = null;
+
+/**
+ * Loads `node:sqlite` only when an OpenCode database exists, so the CLI contract (empty stderr,
+ * JSON-only output) holds on Node versions where the module still emits an ExperimentalWarning.
+ * Only that one warning is dropped while the module loads (R-15, ADR 0022).
+ */
+function loadSqlite(): Promise<SqliteModule> {
+  sqliteModule ??= (async () => {
+    const original = process.emitWarning;
+    process.emitWarning = ((warning: string | Error, ...rest: unknown[]) => {
+      const text = typeof warning === "string" ? warning : warning.message;
+      if (text.startsWith("SQLite is an experimental feature")) return;
+      return (original as (...args: unknown[]) => void).call(process, warning, ...rest);
+    }) as typeof process.emitWarning;
+    try {
+      return await import("node:sqlite");
+    } finally {
+      process.emitWarning = original;
+    }
+  })();
+  return sqliteModule;
+}
+
+function readFromCopiedDb(DatabaseSync: typeof DatabaseSyncType, copyPath: string): string[] {
   const db = new DatabaseSync(copyPath, { readOnly: true });
   try {
     const tables = new Set(
@@ -192,7 +218,8 @@ export async function readOpenCodeSqliteLines(dbPath: string): Promise<readonly 
       await copyFile(dbPath, copyPath);
       await copyIfPresent(`${dbPath}-wal`, `${copyPath}-wal`);
       await copyIfPresent(`${dbPath}-shm`, `${copyPath}-shm`);
-      return readFromCopiedDb(copyPath);
+      const { DatabaseSync } = await loadSqlite();
+      return readFromCopiedDb(DatabaseSync, copyPath);
     } catch (error) {
       if (attempt === 0 && isTransientSqliteError(error)) continue;
       return [diagnosticLine("opencode_db_unreadable", "Could not read OpenCode SQLite database.")];

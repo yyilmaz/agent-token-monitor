@@ -126,6 +126,16 @@ describe("HTML report builder (R-10, R-14, R-71, ADR 0023)", () => {
     assert.equal(parsed.sessions["s-1"]?.session.projectPath, "/Users/dev/my-repo");
   });
 
+  it("strips external script tags whose end tag has trailing whitespace (R-14, R-71)", () => {
+    const analysis = analyze(makeOutput([makeSession("s-1", "One", "/repo")]), defaultConfig(), "UTC");
+    const assets: ReportAssets = {
+      ...SAMPLE_ASSETS,
+      indexHtml: SAMPLE_ASSETS.indexHtml.replace('src="js/main.js"></script>', 'src="js/main.js"></script >'),
+    };
+    const html = buildHtmlReport(buildReportData(analysis, NOW), assets);
+    assert.doesNotMatch(html, /<script[^>]*\bsrc=/i);
+  });
+
   it("inlines all styles/scripts with no external links and valid bundled JS", () => {
     const analysis = analyze(makeOutput([makeSession("s-1", "One", "/repo")]), defaultConfig(), "UTC");
     const html = buildHtmlReport(buildReportData(analysis, NOW), SAMPLE_ASSETS);

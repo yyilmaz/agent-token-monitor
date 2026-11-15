@@ -1,9 +1,11 @@
 // Host tests for strictly read-only OpenCode WAL-mode SQLite reading (R-15, R-18, R-23, ADR 0022).
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { after, describe, it } from "node:test";
 
@@ -83,6 +85,22 @@ describe("OpenCode SQLite host reader (R-15, ADR 0022)", () => {
       // ignore if not created
     }
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it("loads node:sqlite lazily without printing its ExperimentalWarning to stderr (ADR 0022, ADR 0013)", () => {
+    const dbDir = join(root, "warning-dir");
+    mkdirSync(dbDir, { recursive: true });
+    createTestDb(dbDir).close();
+    const moduleUrl = pathToFileURL(join(import.meta.dirname, "../../../src/hosts/node/opencode-sqlite.js")).href;
+    const script = `import(${JSON.stringify(moduleUrl)}).then(async (m) => {
+      const lines = await m.readOpenCodeSqliteLines(${JSON.stringify(join(dbDir, "opencode.db"))});
+      process.stdout.write(String(lines.length));
+    });`;
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8", timeout: 10000 });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0);
+    assert.doesNotMatch(result.stderr, /ExperimentalWarning/);
+    assert.notEqual(result.stdout, "0");
   });
 
   it("reads uncheckpointed WAL writes and refreshes AnalysisStore when -wal changes (R-15, R-18)", async () => {
