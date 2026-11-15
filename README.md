@@ -74,6 +74,18 @@ npm start
 
 The server binds to `127.0.0.1` only and rejects requests with any other `Host` header ([ADR 0013](docs/adr/0013-server-data-api-and-dashboard.md)). Default log paths resolve automatically for macOS, Linux, and Windows; for custom log directories, assumed models, or cache thresholds, see [docs/configuration.md](docs/configuration.md).
 
+### VS Code extension
+
+Build a local `.vsix` package and install it ([ADR 0021](docs/adr/0021-vscode-extension.md)):
+
+```bash
+npm ci
+npm run package
+code --install-extension agent-token-monitor-0.0.0.vsix
+```
+
+Then run **Agent Token Monitor: Open Dashboard** from the Command Palette. To try the extension without installing it, run `code --extensionDevelopmentPath=<repo path>` after `npm run build`.
+
 ---
 
 ## Dashboard tour

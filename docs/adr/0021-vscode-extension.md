@@ -11,7 +11,7 @@ The core (`src/core/`) is host-independent and boundary-tested, and the standalo
 Several concrete technical choices are not yet recorded in ADR 0002, ADR 0005, or ADR 0006:
 
 1. How the extension manifest (`engines.vscode`, `main`, `contributes`) is packaged alongside the standalone CLI.
-2. Which development dependencies are added (`@types/vscode`, and whether a bundler or `@vscode/vsce` is needed).
+2. Which development dependencies are added (`@types/vscode`, `@vscode/vsce`, and whether a bundler is needed) and how the `.vsix` package is produced.
 3. How the Webview loads `web/` assets under VS Code's Content Security Policy, switches `web/src/data.ts` to `postMessage`, and follows the active VS Code theme (R-26).
 4. How `agentTokenMonitor.configPath` is resolved and how `src/hosts/vscode/` is unit-tested under `node --test`.
 
@@ -27,18 +27,23 @@ Several concrete technical choices are not yet recorded in ADR 0002, ADR 0005, o
 2. **Development dependencies only:**
    - Add `"@types/vscode": "1.108.0"` (pinned to an exact version, matching `engines.vscode`) to `devDependencies`. Runtime dependencies remain zero (ADR 0004).
    - Add `"vscode"` to `"types"` in `tsconfig.json` (or import `"vscode"` with `@types/vscode` installed).
-   - Defer `@vscode/vsce` until release/CI `.vsix` packaging is requested.
-3. **Host reuse and configuration resolution:**
+   - Add `"@vscode/vsce": "4.1.1"` (exact version) to `devDependencies` for `.vsix` packaging only. It is never loaded at runtime.
+3. **`.vsix` packaging:**
+   - `npm run package` runs `vsce package` and writes `agent-token-monitor-<version>.vsix` to the repository root. `*.vsix` is git-ignored.
+   - `vsce` runs `vscode:prepublish` (`npm run build`) first, so the package always contains a fresh `dist/`.
+   - The package contents are the existing `files` allowlist of `package.json` (`config/default.json`, `dist/src/`, `dist/web/`, `web/static/`, `web/vendor/`) plus the files `vsce` always adds (`package.json`, `README.md`, `LICENSE`). No `.vscodeignore` is used, so the CLI package and the extension package ship the same files.
+   - Publishing to the Visual Studio Marketplace or Open VSX is not part of this decision.
+4. **Host reuse and configuration resolution:**
    - `src/hosts/vscode/` reuses `AnalysisStore`, `defaultConfigPath`, `expandHome`, and `resolveUserConfigPath` from `src/hosts/node/` (both run on Node.js).
    - When `agentTokenMonitor.configPath` is non-empty, leading `~` is expanded and relative paths are resolved against the first open workspace folder (or `homedir()` if none is open). When empty, `resolveUserConfigPath` falls back to `$XDG_CONFIG_HOME/agent-token-monitor/config.json` or `~/.config/agent-token-monitor/config.json`.
    - Changing `agentTokenMonitor.configPath` via `workspace.onDidChangeConfiguration` updates the store's config path and triggers a refresh of an open Webview panel.
-4. **Webview CSP, asset loading, `postMessage` bridge, and theme:**
+5. **Webview CSP, asset loading, `postMessage` bridge, and theme:**
    - The Webview panel sets `localResourceRoots` to `web/static`, `web/vendor`, and `dist/web/src` only.
    - The extension builds the Webview HTML from `web/static/index.html`, rewriting relative asset URLs (`vendor/...`, `style.css`, `js/main.js`) to `webview.asWebviewUri(...)` and injecting a strict CSP `<meta>` tag:
      `default-src 'none'; style-src ${webview.cspSource}; script-src ${webview.cspSource}; img-src ${webview.cspSource};`
    - `web/src/data.ts` detects `acquireVsCodeApi` at runtime (declared via local ambient type, no `vscode` import in `web/`). In a Webview, `getJson(endpoint)` sends `{ type: "apiRequest", id, endpoint }` via `postMessage` and awaits `{ type: "apiResponse", id, status, body }` from the extension host, which routes the same `/api/*` endpoints as `src/hosts/node/server.ts`.
    - `web/src/main.ts` observes `document.body` class changes (`vscode-light`, `vscode-dark`, `vscode-high-contrast`) when running inside a VS Code Webview so `data-bs-theme` tracks the active editor theme (R-26).
-5. **Testing:**
+6. **Testing:**
    - Unit tests in `test/hosts/vscode/` run with `node --test` against a lightweight mock of the VS Code API (testing config path resolution, `postMessage` API routing, HTML/CSP rewriting, and panel lifecycle without launching Electron).
 
 ## Alternatives considered

@@ -27,6 +27,7 @@ Requires Node.js 22.12 or newer.
 npm ci          # install the locked development tools
 npm test        # builds with tsc, then runs node --test
 npm start       # builds, then serves the dashboard on 127.0.0.1:4317
+npm run package # builds, then writes the VS Code extension .vsix (ADR 0021)
 ```
 
 ## Adding a harness adapter

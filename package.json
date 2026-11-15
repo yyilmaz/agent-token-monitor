@@ -53,6 +53,7 @@
     }
   },
   "files": [
+    "LICENSE",
     "config/default.json",
     "dist/src/",
     "dist/web/",
@@ -65,6 +66,8 @@
   },
   "scripts": {
     "build": "tsc",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package",
     "prepare": "npm run build",
     "start": "tsc && node dist/src/hosts/node/main.js --port 4317",
     "status": "tsc && node dist/src/hosts/node/main.js --status",
@@ -73,6 +76,7 @@
   "devDependencies": {
     "@types/node": "26.6.6",
     "@types/vscode": "1.108.0",
+    "@vscode/vsce": "4.1.1",
     "typescript": "7.0.2"
   }
 }
