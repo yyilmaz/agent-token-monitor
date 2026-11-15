@@ -75,6 +75,8 @@ interface SubagentLink {
   readonly parent: string;
   readonly child: string;
   readonly spawnStep: number | null;
+  readonly title: string | null;
+  readonly projectPath: string | null;
   readonly source: SourceRef;
 }
 
@@ -181,8 +183,8 @@ export function combineAntigravity(results: readonly AntigravityFileResult[]): A
       parentSessionId: link === undefined ? null : sessionId(link.parent),
       isSubagent: link !== undefined,
       spawnedBySessionId: null,
-      title: titles.get(conversation.nativeId) ?? null,
-      projectPath: null,
+      title: titles.get(conversation.nativeId) ?? link?.title ?? null,
+      projectPath: link?.projectPath ?? null,
       sources: link === undefined ? conversation.sources : [...conversation.sources, link.source].sort(compareSources),
     });
     if (link === undefined) continue;
@@ -364,7 +366,33 @@ function readSubagentLink(file: LogFile, parent: string, diagnose: Diagnose): Su
   }
   const spawn = link["spawnStepIndex"];
   const spawnStep = typeof spawn === "number" && Number.isSafeInteger(spawn) && spawn >= 0 ? spawn : null;
-  return { parent, child, spawnStep, source };
+  const descriptor = isObject(link["subagentDescriptor"]) ? link["subagentDescriptor"] : null;
+  // ADR 0016 / R-18: keep only the subagent's role/type label as title and workspace path; discard state and other fields.
+  const title = nonEmptyString(descriptor?.["role"]) ?? nonEmptyString(descriptor?.["typeName"]);
+  const projectPath = firstFileUriPath(link["workspaceUris"]);
+  return { parent, child, spawnStep, title, projectPath, source };
+}
+
+function nonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function firstFileUriPath(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  for (const item of value) {
+    if (typeof item !== "string" || !item.startsWith("file://")) continue;
+    try {
+      const url = new URL(item);
+      if (url.protocol !== "file:") continue;
+      const decoded = decodeURIComponent(url.pathname).replace(/^\/([A-Za-z]:\/)/, "$1");
+      if (decoded !== "") return decoded;
+    } catch {
+      // Ignore malformed URI values.
+    }
+  }
+  return null;
 }
 
 function readAnnotation(file: LogFile, nativeId: string): { readonly nativeId: string; readonly title: string } | null {

@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { type AdviceConfig, type SessionAdvice, sessionAdvice } from "../../../src/core/analysis/advice.js";
+import { type AdviceConfig, type SessionAdvice, sessionAdvice, sessionWeightedSummary } from "../../../src/core/analysis/advice.js";
 import { analyzeCache, type CacheConfig } from "../../../src/core/analysis/cache.js";
 import { openSessions } from "../../../src/core/analysis/live.js";
 import type { Config } from "../../../src/core/config/config.js";
@@ -330,5 +330,26 @@ describe("WORKFLOW-1 (detail only)", () => {
     const a = advise({ C: 30000, idle: WARM });
     // Steps at 80,000..83,000 then 30,000 cache read (×0.1) plus 10 output (×5) each.
     assert.equal(a.workflow.sessionWeightedTokens, 8000 + 8100 + 8200 + 8300 + 3000 + 5 * 50);
+  });
+
+  it("records active-window STEP-1 turn counts and latest tool names in sessionWeightedSummary", () => {
+    const summary = sessionWeightedSummary(
+      "sub",
+      {
+        sessions: [session("sub", "claudeCode", "main")],
+        calls: [
+          call("1", "sub", ago(300), 1000, "claude-opus-5-5", ["Edit"]),
+          call("2", "sub", ago(20), 1000, "claude-opus-5-5", ["Read"]),
+          call("3", "sub", ago(10), 1000, "claude-opus-5-5", ["Bash"], ["explore"]),
+          call("4", "sub", ago(5), 1000, "claude-opus-5-5", []),
+        ],
+        events: [event("sub", ago(100), "compaction")],
+      },
+      { rules: RULES },
+    );
+    assert.deepEqual(
+      [summary.totalTurns, summary.activeTurns, summary.editTurns, summary.exploreTurns, summary.otherTurns, summary.lastToolNames],
+      [4, 3, 0, 2, 1, ["Bash"]],
+    );
   });
 });

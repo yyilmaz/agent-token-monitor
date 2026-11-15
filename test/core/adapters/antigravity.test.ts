@@ -39,12 +39,12 @@ describe("Antigravity adapter", async () => {
     assert.deepEqual(files.map((f) => f.file), [CHILD, PARENT, LINK]);
   });
 
-  it("creates one session per conversation, subagents linked to their parent", () => {
+  it("creates one session per conversation, subagents linked to their parent with role title and workspace path", () => {
     assert.deepEqual(
-      output.sessions.map((s) => [s.id, s.parentSessionId, s.isSubagent, s.projectPath, s.sources]),
+      output.sessions.map((s) => [s.id, s.parentSessionId, s.isSubagent, s.title, s.projectPath, s.sources]),
       [
-        ["antigravity:conv-child", "antigravity:conv-root", true, null, [src(CHILD, 1), src(LINK, 1)]],
-        ["antigravity:conv-root", null, false, null, [src(PARENT, 1)]],
+        ["antigravity:conv-child", "antigravity:conv-root", true, "Inspect the helper", "/fixture/project", [src(CHILD, 1), src(LINK, 1)]],
+        ["antigravity:conv-root", null, false, null, null, [src(PARENT, 1)]],
       ],
     );
   });
@@ -219,6 +219,35 @@ describe("Antigravity adapter edge cases", () => {
     };
     const output = parseAntigravity([transcript("c", [planner({ input_tokens: 1, cache_read_tokens: 0, output_tokens: 2 })]), annotation]);
     assert.equal(output.sessions[0]?.title, 'Example "Title"');
+  });
+
+  it("falls back to typeName for subagent title, prefers .pbtxt if present, and ignores non-file URIs", () => {
+    const link: LogFile = {
+      logRoot: ROOT,
+      file: "p/.system_generated/subagents/k.json",
+      lines: [
+        JSON.stringify({
+          conversationId: "k",
+          spawnStepIndex: 1,
+          state: "SUBAGENT_STATE_ALIVE",
+          subagentDescriptor: { role: "  ", typeName: "research" },
+          workspaceUris: ["https://example.invalid/repo", "file:///work/demo%20app"],
+        }),
+      ],
+    };
+    const output = parseAntigravity([transcript("p", [planner({})]), transcript("k", [planner({})]), link]);
+    const child = output.sessions.find((s) => s.id === "antigravity:k");
+    assert.equal(child?.title, "research");
+    assert.equal(child?.projectPath, "/work/demo app");
+    assert.equal(JSON.stringify(output).includes("SUBAGENT_STATE_ALIVE"), false);
+
+    const override = parseAntigravity([
+      transcript("p", [planner({})]),
+      transcript("k", [planner({})]),
+      link,
+      { logRoot: "antigravityIndex:0", file: "k.pbtxt", lines: ['title:"Annotation Override"'] },
+    ]);
+    assert.equal(override.sessions.find((s) => s.id === "antigravity:k")?.title, "Annotation Override");
   });
 
   it("reports files outside the known layout", () => {

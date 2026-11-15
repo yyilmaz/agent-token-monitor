@@ -100,7 +100,7 @@ For each case:
 
 ### What the user sees
 
-The Now view's Advice column shows the badge, one line with the break-even and the typical task length, and one line with the `WORKFLOW-1` profile. `N` is the break-even in messages.
+The Now view's Advice column shows the badge, one line with the break-even and the typical task length, and one line with the `WORKFLOW-1` profile. Subagent rows receive no advice verdict (`A10`) and show only their active-window `STEP-1` turn counts and latest tool names as detail. `N` is the break-even in messages.
 
 | Verdict | Badge |
 |---|---|

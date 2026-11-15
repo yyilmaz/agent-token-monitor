@@ -106,6 +106,10 @@ export interface SessionWeightedSummary {
   readonly recentTurnsWindow: number;
   readonly totalTurns: number;
   readonly activeTurns: number;
+  readonly editTurns: number;
+  readonly exploreTurns: number;
+  readonly otherTurns: number;
+  readonly lastToolNames: readonly string[];
   readonly compactions: number;
   readonly lastStepWeightedTokens: number | null;
   readonly recentAvgWeightedTokens: number | null;
@@ -140,6 +144,13 @@ export function sessionWeightedSummary(
   const activeTurnCalls =
     lastCompactionAt === null ? allTurnCalls : allTurnCalls.filter((c) => c.timestamp > lastCompactionAt);
 
+  const counts = { edit: 0, explore: 0, other: 0 };
+  let lastToolNames: readonly string[] = [];
+  for (const call of activeTurnCalls) {
+    counts[turnStepClass(call)] += 1;
+    if (call.toolNames.length > 0) lastToolNames = call.toolNames;
+  }
+
   const allWeighted = allTurnCalls.map((c) => callWeightedTokens(c, weights)).filter((w): w is number => w !== null);
   const activeWeighted = activeTurnCalls.map((c) => callWeightedTokens(c, weights)).filter((w): w is number => w !== null);
   const recentSlice = activeWeighted.slice(-recentWindow);
@@ -172,6 +183,10 @@ export function sessionWeightedSummary(
     recentTurnsWindow: recentWindow,
     totalTurns: allTurnCalls.length,
     activeTurns: activeTurnCalls.length,
+    editTurns: counts.edit,
+    exploreTurns: counts.explore,
+    otherTurns: counts.other,
+    lastToolNames,
     compactions,
     lastStepWeightedTokens,
     recentAvgWeightedTokens,
