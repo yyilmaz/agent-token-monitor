@@ -18,6 +18,7 @@ const TABS: readonly [hash: string, label: string][] = [
 interface Response {
   readonly asOf: number;
   readonly diagnosticCount?: number;
+  readonly historyLoading?: api.HistoryLoadingStatus;
   readonly configuration: { readonly ui: { readonly pollIntervalSeconds: number } };
 }
 
@@ -118,9 +119,12 @@ async function refresh(): Promise<void> {
     interval = data.configuration.ui.pollIntervalSeconds;
     diagnosticsCount = data.diagnosticCount;
     renderDiagnosticsTab();
+    renderHistoryLoading(data.historyLoading);
     status.textContent = isOfflineReport()
       ? `Exported report (${new Date(data.asOf).toLocaleString()})`
-      : `Updated ${new Date(data.asOf).toLocaleTimeString()}`;
+      : data.historyLoading
+        ? `Loading history (${data.historyLoading.loadedFiles}/${data.historyLoading.totalFiles})…`
+        : `Updated ${new Date(data.asOf).toLocaleTimeString()}`;
     status.classList.remove("error");
   } catch (error) {
     if (mine !== generation) return;
@@ -143,6 +147,19 @@ async function refresh(): Promise<void> {
   if (!isOfflineReport()) {
     timer = window.setTimeout(() => void refresh(), interval * 1000);
   }
+}
+
+function renderHistoryLoading(loading: api.HistoryLoadingStatus | undefined): void {
+  const banner = document.getElementById("history-loading");
+  const text = document.getElementById("history-loading-text");
+  if (banner === null || text === null) return;
+  if (loading === undefined) {
+    banner.hidden = true;
+    text.textContent = "";
+    return;
+  }
+  banner.hidden = false;
+  text.textContent = `Reading older logs in the background (${loading.loadedFiles} / ${loading.totalFiles} files)… Usage, Cache, and historical advice baselines will update automatically when complete.`;
 }
 
 function renderTabs(): void {

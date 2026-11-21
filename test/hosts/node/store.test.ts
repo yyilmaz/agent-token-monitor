@@ -2,7 +2,7 @@
 // fresh store reading everything. Works on a copy of the fixtures in a temporary directory (R-15).
 
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -104,5 +104,42 @@ describe("harness sources (R-20, R-21, R-23)", () => {
       ["opencode", true, "found"],
     ]);
     assert.equal(state.analysis.sources.find((s) => s.harness === "codex")?.files, 2);
+  });
+});
+
+describe("active-first progressive loading (ADR 0024)", () => {
+  const root = mkdtempSync(join(tmpdir(), "atm-progressive-"));
+  after(() => rmSync(root, { recursive: true, force: true }));
+  cpSync(FIXTURES, join(root, "logs"), { recursive: true });
+  const projectsDir = join(root, "logs", "claude-code", "projects", "-fixture-project");
+  // Mark session-b.jsonl as older than openWithinSeconds (1800s) relative to now.
+  const now = Date.now();
+  const oldTime = new Date(now - 3600_000);
+  utimesSync(join(projectsDir, "session-b.jsonl"), oldTime, oldTime);
+  const config = join(root, "config.json");
+  writeFileSync(
+    config,
+    JSON.stringify({
+      logRoots: {
+        claudeCode: [join(root, "logs", "claude-code", "projects")],
+        antigravity: [],
+        codex: [],
+        opencode: [],
+      },
+    }),
+  );
+
+  it("returns active files immediately with historyLoading, then completes in background", async () => {
+    const store = new AnalysisStore({ defaultsPath: defaultConfigPath(), userConfigPath: config, homeDir: root, systemTimeZone: "UTC" });
+    const first = await store.current(now);
+    assert.ok(first.ok);
+    assert.ok(first.analysis.historyLoading !== undefined, "should report historyLoading while deferred files load");
+    assert.ok(first.analysis.historyLoading.loadedFiles < first.analysis.historyLoading.totalFiles);
+
+    await store.idle();
+    const done = await store.current(now);
+    assert.ok(done.ok);
+    assert.equal(done.analysis.historyLoading, undefined);
+    assert.ok(done.analysis.data.sessions.length > first.analysis.data.sessions.length);
   });
 });

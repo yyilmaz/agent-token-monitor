@@ -51,6 +51,8 @@ async function main(): Promise<void> {
   });
   if (argv.includes("--status")) {
     const now = Date.now();
+    await store.current(now);
+    await store.idle();
     const state = await store.current(now);
     if (!state.ok) {
       process.stderr.write(stableStringify({ error: "invalidConfiguration", errors: state.errors }) + "\n");
@@ -76,6 +78,8 @@ async function main(): Promise<void> {
     },
     port,
   );
+  // Warm up active sessions immediately in the background (ADR 0024).
+  void store.current(Date.now()).catch(() => {});
   console.log(`agent-token-monitor: http://127.0.0.1:${(server.address() as AddressInfo).port}/`);
 }
 

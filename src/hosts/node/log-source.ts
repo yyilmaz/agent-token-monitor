@@ -38,13 +38,21 @@ export class FsLogSource implements LogSource {
     return { logRoot, file, lines: text.split(/\r?\n/) };
   }
 
-  /** Size and modification time of one file, used to notice changes without reading it (ADR 0013). */
-  async fingerprint(logRoot: string, file: string): Promise<string> {
+  /** Size and modification time of one file, used to notice changes without reading it (ADR 0013, ADR 0024). */
+  async statEntry(logRoot: string, file: string): Promise<{ readonly fingerprint: string; readonly mtimeMs: number }> {
     const fullPath = join(this.rootDir(logRoot), ...file.split("/"));
     const info = await stat(fullPath);
     const base = `${info.size}:${info.mtimeMs}`;
-    if (!SQLITE_DB_FILE.test(file)) return base;
-    return `${base}|${await optionalStamp(`${fullPath}-wal`)}`;
+    if (!SQLITE_DB_FILE.test(file)) return { fingerprint: base, mtimeMs: info.mtimeMs };
+    const wal = await optionalStat(`${fullPath}-wal`);
+    const walStamp = wal === null ? "missing" : `${wal.size}:${wal.mtimeMs}`;
+    const mtimeMs = wal === null ? info.mtimeMs : Math.max(info.mtimeMs, wal.mtimeMs);
+    return { fingerprint: `${base}|${walStamp}`, mtimeMs };
+  }
+
+  /** Size and modification time of one file, used to notice changes without reading it (ADR 0013). */
+  async fingerprint(logRoot: string, file: string): Promise<string> {
+    return (await this.statEntry(logRoot, file)).fingerprint;
   }
 
   private rootDir(logRoot: string): string {
@@ -74,12 +82,12 @@ function isMissing(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT";
 }
 
-async function optionalStamp(path: string): Promise<string> {
+async function optionalStat(path: string): Promise<{ readonly size: number; readonly mtimeMs: number } | null> {
   try {
     const info = await stat(path);
-    return `${info.size}:${info.mtimeMs}`;
+    return { size: info.size, mtimeMs: info.mtimeMs };
   } catch (error) {
-    if (isMissing(error)) return "missing";
+    if (isMissing(error)) return null;
     throw error;
   }
 }

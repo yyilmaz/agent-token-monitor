@@ -57,3 +57,4 @@ What becomes easier, harder or constrained as a result.
 | [0021](0021-vscode-extension.md) | Native VS Code extension host | Accepted |
 | [0022](0022-opencode-adapter.md) | OpenCode SQLite adapter | Accepted |
 | [0023](0023-html-report-export.md) | Self-contained HTML report export | Accepted |
+| [0024](0024-active-first-progressive-loading.md) | Active-first progressive log loading | Accepted |
