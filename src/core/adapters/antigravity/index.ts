@@ -9,7 +9,8 @@
 //   `step_index`. `input_tokens` excludes cached tokens, so it maps directly to `inputUncached`.
 // - The log has no cache-write category: prompt tokens not read from cache are counted in
 //   `input_tokens`. `cacheWrite` is therefore 0 by the billing exception of ADR 0008 rule 2.
-// - Neither the model name nor thinking tokens are logged: `model` and `reasoning` are unknown.
+// - Thinking tokens are not logged, so `reasoning` is unknown. Older transcripts omit `model`;
+//   newer `PLANNER_RESPONSE` steps record it (missing, empty, or non-string values become `null`).
 // - A `CHECKPOINT` step marks a compaction. Its summarization request is not logged, so it becomes a
 //   compaction Call whose token fields are all unknown (R-16).
 // - Subagents are separate conversations. The parent's `subagents/<child>.json` names the child and
@@ -316,7 +317,7 @@ function readPlannerResponse(
     id: `${HARNESS}:${nativeKey}`,
     sessionId: session,
     timestamp,
-    model: null,
+    model: readModel(step["model"]),
     kind: "turn",
     inputUncached,
     cacheRead,
@@ -329,6 +330,12 @@ function readPlannerResponse(
     shellClasses: shellClassesOf(step["tool_calls"]),
     sources: [source],
   };
+}
+
+function readModel(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed !== "" ? trimmed : null;
 }
 
 function compactionCall(nativeKey: string, session: string, timestamp: number, source: SourceRef): Call {

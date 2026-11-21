@@ -250,6 +250,21 @@ describe("Antigravity adapter edge cases", () => {
     assert.equal(override.sessions.find((s) => s.id === "antigravity:k")?.title, "Annotation Override");
   });
 
+  it("reads model from PLANNER_RESPONSE when present and falls back to null otherwise (R-22, ADR 0008)", () => {
+    const output = parseAntigravity([
+      transcript("c", [
+        planner({ step_index: 1, model: "gemini-4-hydrogen-medium", input_tokens: 1, cache_read_tokens: 0, output_tokens: 2 }),
+        planner({ step_index: 2, model: "  ", input_tokens: 1, cache_read_tokens: 0, output_tokens: 2 }),
+        planner({ step_index: 3, model: 123, input_tokens: 1, cache_read_tokens: 0, output_tokens: 2 }),
+        planner({ step_index: 4, input_tokens: 1, cache_read_tokens: 0, output_tokens: 2 }),
+      ]),
+    ]);
+    assert.deepEqual(
+      output.calls.map((c) => c.model),
+      ["gemini-4-hydrogen-medium", null, null, null],
+    );
+  });
+
   it("reports files outside the known layout", () => {
     const output = parseAntigravity([{ logRoot: ROOT, file: "loose.jsonl", lines: [] }]);
     assert.deepEqual(output.diagnostics.map((d) => d.code), ["unexpectedPath"]);
