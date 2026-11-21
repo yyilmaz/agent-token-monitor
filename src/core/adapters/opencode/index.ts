@@ -187,6 +187,7 @@ export function readOpenCodeFile(file: LogFile): OpenCodeFileResult {
         isSubagent: parentSessionId !== null,
         spawnedBySessionId: null,
         title: str(parsed.title),
+        isArchived: epochMs(parsed.timeArchived) !== null,
         projectPath: str(parsed.projectPath),
         sources: [source],
       });

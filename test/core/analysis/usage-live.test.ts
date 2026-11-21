@@ -48,6 +48,7 @@ const session = (id: string, harness: Session["harness"], projectPath: string | 
   isSubagent: parent !== null,
   spawnedBySessionId: null,
   title: null,
+  isArchived: false,
   projectPath,
   sources: [],
 });

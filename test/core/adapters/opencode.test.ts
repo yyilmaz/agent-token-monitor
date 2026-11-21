@@ -41,9 +41,17 @@ describe("OpenCode adapter (ADR 0022)", () => {
     assert.equal(main.isSubagent, false);
     assert.equal(main.parentSessionId, null);
     assert.equal(main.title, "Fix build");
+    assert.equal(main.isArchived, false);
     assert.equal(main.projectPath, "/workspace/app");
     assert.equal(sub.isSubagent, true);
     assert.equal(sub.parentSessionId, "opencode:sess-main");
+
+    const archivedOut = parseOpenCodeFiles([{
+      logRoot: "opencode:0",
+      file: "opencode.db",
+      lines: [JSON.stringify({ record: "session", id: "sess-arch", parentId: null, projectPath: "/workspace/app", title: "Old", timeCreated: 1793000000000, timeArchived: 1793000100000 })],
+    }]);
+    assert.equal(archivedOut.sessions[0]?.isArchived, true);
 
     // 2 assistant calls + 1 compaction call + 1 invalid-token assistant call = 4 calls
     assert.equal(out.calls.length, 4);

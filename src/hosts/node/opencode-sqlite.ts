@@ -17,6 +17,7 @@ interface RawSessionRow {
   readonly directory: string;
   readonly title: string | null;
   readonly time_created: number;
+  readonly time_archived: number | null;
 }
 
 interface RawMessageRow {
@@ -141,9 +142,13 @@ function readFromCopiedDb(DatabaseSync: typeof DatabaseSyncType, copyPath: strin
       return [diagnosticLine("opencode_schema_unsupported", "OpenCode database is missing expected session_v2 tables.")];
     }
 
+    const sessionCols = new Set(
+      (db.prepare("PRAGMA table_info(session_v2)").all() as { name: string }[]).map((c) => c.name),
+    );
+    const selectArchived = sessionCols.has("time_archived") ? "time_archived" : "NULL AS time_archived";
     const lines: string[] = [];
     const sessions = db
-      .prepare("SELECT id, parent_id, directory, title, time_created FROM session_v2 ORDER BY time_created, id")
+      .prepare(`SELECT id, parent_id, directory, title, time_created, ${selectArchived} FROM session_v2 ORDER BY time_created, id`)
       .all() as unknown as RawSessionRow[];
     for (const s of sessions) {
       lines.push(
@@ -154,6 +159,7 @@ function readFromCopiedDb(DatabaseSync: typeof DatabaseSyncType, copyPath: strin
           projectPath: s.directory,
           title: s.title,
           timeCreated: s.time_created,
+          timeArchived: s.time_archived,
         }),
       );
     }

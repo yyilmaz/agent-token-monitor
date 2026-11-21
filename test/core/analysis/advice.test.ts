@@ -50,7 +50,7 @@ function call(
 
 const session = (id: string, harness: HarnessId = "claudeCode", parent: string | null = null): Session => ({
   id, harness, nativeId: id, parentSessionId: parent, isSubagent: parent !== null, spawnedBySessionId: null,
-  title: null, projectPath: "/p", sources: [],
+  title: null, isArchived: false, projectPath: "/p", sources: [],
 });
 
 const event = (sessionId: string, timestamp: number, type: "userTurn" | "compaction", postTokens: number | null = null): Event => ({

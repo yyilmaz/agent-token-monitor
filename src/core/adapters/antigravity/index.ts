@@ -99,8 +99,8 @@ export interface AntigravityFileResult {
   } | null;
   /** Set for a valid subagent link file. */
   readonly link: SubagentLink | null;
-  /** Set for a `.pbtxt` annotation file with a non-empty `title` (ADR 0016). */
-  readonly annotation: { readonly nativeId: string; readonly title: string } | null;
+  /** Set for a `.pbtxt` annotation file with a non-empty `title` or `archived: true` (ADR 0016). */
+  readonly annotation: { readonly nativeId: string; readonly title: string | null; readonly isArchived: boolean } | null;
   readonly calls: readonly Call[];
   readonly events: readonly Event[];
   readonly diagnostics: readonly Diagnostic[];
@@ -142,6 +142,7 @@ export function combineAntigravity(results: readonly AntigravityFileResult[]): A
   const conversations = new Map<string, ConversationAcc>();
   const links: SubagentLink[] = [];
   const titles = new Map<string, string>();
+  const archived = new Set<string>();
   const calls: Call[] = [];
   const events: Event[] = [];
   const diagnostics: Diagnostic[] = [];
@@ -154,7 +155,10 @@ export function combineAntigravity(results: readonly AntigravityFileResult[]): A
     events.push(...result.events);
     diagnostics.push(...result.diagnostics);
     if (result.link !== null) links.push(result.link);
-    if (result.annotation !== null) titles.set(result.annotation.nativeId, result.annotation.title);
+    if (result.annotation !== null) {
+      if (result.annotation.title !== null) titles.set(result.annotation.nativeId, result.annotation.title);
+      if (result.annotation.isArchived) archived.add(result.annotation.nativeId);
+    }
     if (result.conversation === null) continue;
     const conversation = conversationAcc(conversations, result.conversation.nativeId);
     conversation.sources.push({ logRoot: result.logRoot, file: result.file, line: 1 });
@@ -185,6 +189,7 @@ export function combineAntigravity(results: readonly AntigravityFileResult[]): A
       isSubagent: link !== undefined,
       spawnedBySessionId: null,
       title: titles.get(conversation.nativeId) ?? link?.title ?? null,
+      isArchived: archived.has(conversation.nativeId),
       projectPath: link?.projectPath ?? null,
       sources: link === undefined ? conversation.sources : [...conversation.sources, link.source].sort(compareSources),
     });
@@ -411,14 +416,20 @@ const PBTXT_ESCAPES: Readonly<Record<string, string>> = {
   t: "\t",
 };
 
-function readAnnotation(file: LogFile, nativeId: string): { readonly nativeId: string; readonly title: string } | null {
+function readAnnotation(
+  file: LogFile,
+  nativeId: string,
+): { readonly nativeId: string; readonly title: string | null; readonly isArchived: boolean } | null {
   const text = file.lines.join("\n");
   const match = /\btitle\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(text);
-  if (match === null) return null;
-  const title = (match[1] as string)
-    .replace(/\\([\\"'nrt])/g, (seq, ch: string) => PBTXT_ESCAPES[ch] ?? seq)
-    .trim();
-  return title === "" ? null : { nativeId, title };
+  const rawTitle = match === null
+    ? ""
+    : (match[1] as string)
+        .replace(/\\([\\"'nrt])/g, (seq, ch: string) => PBTXT_ESCAPES[ch] ?? seq)
+        .trim();
+  const title = rawTitle === "" ? null : rawTitle;
+  const isArchived = /\barchived\s*:\s*true\b/.test(text);
+  return title === null && !isArchived ? null : { nativeId, title, isArchived };
 }
 
 function toolNamesOf(toolCalls: unknown): string[] {

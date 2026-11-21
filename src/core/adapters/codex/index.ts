@@ -219,6 +219,7 @@ export function readCodexFile(file: LogFile): CodexFileResult {
         isSubagent: parent !== null || subagent !== null || string(payload.agent_path) !== null,
         spawnedBySessionId: null,
         title: null,
+        isArchived: false,
         projectPath: string(payload.cwd),
         sources: [source],
       };

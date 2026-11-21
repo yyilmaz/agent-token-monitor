@@ -54,7 +54,7 @@ function call(spec: CallSpec): Call {
 }
 
 function session(id: string, harness: HarnessId = "claudeCode"): Session {
-  return { id, harness, nativeId: id, parentSessionId: null, isSubagent: false, spawnedBySessionId: null, title: null, projectPath: null, sources: [] };
+  return { id, harness, nativeId: id, parentSessionId: null, isSubagent: false, spawnedBySessionId: null, title: null, isArchived: false, projectPath: null, sources: [] };
 }
 
 function compactionEvent(at: number, sessionId = "s"): Event {

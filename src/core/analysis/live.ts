@@ -16,6 +16,7 @@ export interface OpenSession {
   readonly isSubagent: boolean;
   readonly spawnedBySessionId: string | null;
   readonly title: string | null;
+  readonly isArchived: boolean;
   readonly project: string | null;
   readonly model: string | null;
   readonly modelSource: ModelSource | null;
@@ -76,6 +77,7 @@ export function openSessions(
       isSubagent: session.isSubagent,
       spawnedBySessionId: session.spawnedBySessionId,
       title: session.title,
+      isArchived: session.isArchived,
       project: session.projectPath,
       model: result.model,
       modelSource: result.modelSource,
@@ -98,6 +100,7 @@ export interface TreeRow {
   readonly relation: "root" | "sideSession" | "subagent";
   readonly harness: HarnessId;
   readonly title: string | null;
+  readonly isArchived: boolean;
   readonly project: string | null;
   /** The open session; null for a session shown only because one of its descendants is open ("waiting"). */
   readonly open: OpenSession | null;
@@ -155,6 +158,7 @@ export function sessionTree(sessions: readonly Session[], open: readonly OpenSes
       relation: depth === 0 ? "root" : s.isSubagent ? "subagent" : "sideSession",
       harness: s.harness,
       title: s.title,
+      isArchived: s.isArchived,
       project: s.projectPath,
       open: openById.get(id) ?? null,
     });

@@ -363,6 +363,7 @@ export function sessionAdvice(
             isSubagent: cur.isSubagent,
             spawnedBySessionId: cur.spawnedBySessionId,
             title: cur.title,
+            isArchived: cur.isArchived,
             project: cur.projectPath,
             model: lastResult.model,
             modelSource: lastResult.modelSource,

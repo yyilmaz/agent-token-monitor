@@ -14,6 +14,7 @@ type Overview = ReturnType<typeof overview>;
 export interface NowState {
   readonly harness: string;
   readonly project: string;
+  readonly showArchived: boolean;
 }
 
 const HARNESS_ORDER = ["claudeCode", "antigravity", "codex", "opencode"];
@@ -166,7 +167,9 @@ export function renderNow(data: Overview, state: NowState, onChange: (next: NowS
       rows,
       state.harness || state.project
         ? "No open sessions match the current filters."
-        : `No session had a call in the last ${f.duration(data.configuration.liveView.openWithinSeconds)}.`,
+        : !state.showArchived && data.sessionTree.some((r) => r.isArchived)
+          ? "All open sessions are archived."
+          : `No session had a call in the last ${f.duration(data.configuration.liveView.openWithinSeconds)}.`,
       undefined,
       "open-sessions",
     ),
@@ -196,16 +199,33 @@ function nowFilters(tree: readonly TreeRow[], state: NowState, onChange: (next: 
     state.project,
     (v) => onChange({ ...state, project: v }),
   );
+  const archivedCount = tree.filter((r) => r.isArchived).length;
+  const archivedToggle =
+    archivedCount === 0
+      ? null
+      : (() => {
+          const btn = h(
+            "button",
+            {
+              type: "button",
+              class: `btn btn-sm col-toggle${state.showArchived ? "" : " reset"}`,
+              "aria-pressed": String(state.showArchived),
+            },
+            state.showArchived ? `Hide archived (${archivedCount})` : `Show archived (${archivedCount})`,
+          );
+          btn.addEventListener("click", () => onChange({ ...state, showArchived: !state.showArchived }));
+          return btn;
+        })();
   const clear =
     state.harness === "" && state.project === ""
       ? null
       : (() => {
           const btn = h("button", { type: "button", class: "btn btn-sm col-toggle reset" }, "Clear");
-          btn.addEventListener("click", () => onChange({ harness: "", project: "" }));
+          btn.addEventListener("click", () => onChange({ ...state, harness: "", project: "" }));
           return btn;
         })();
 
-  return h("div", { class: "d-flex flex-wrap align-items-center gap-2" }, harnessSelect, projectSelect, clear);
+  return h("div", { class: "d-flex flex-wrap align-items-center gap-2" }, harnessSelect, projectSelect, archivedToggle, clear);
 }
 
 function selectControl(ariaLabel: string, options: readonly (readonly [string, string])[], value: string, onSelect: (value: string) => void): HTMLSelectElement {
@@ -219,10 +239,11 @@ function selectControl(ariaLabel: string, options: readonly (readonly [string, s
 }
 
 function filterTree(tree: readonly TreeRow[], state: NowState): TreeRow[] {
-  if (state.harness === "" && state.project === "") return [...tree];
+  if (state.harness === "" && state.project === "" && state.showArchived) return [...tree];
   const keep = new Set<number>();
   for (let i = 0; i < tree.length; i++) {
     const r = tree[i] as TreeRow;
+    if (!state.showArchived && r.isArchived) continue;
     const matchesHarness = state.harness === "" || r.harness === state.harness;
     const matchesProject = state.project === "" || f.repository(r.project) === state.project;
     if (!matchesHarness || !matchesProject) continue;
@@ -266,6 +287,7 @@ function sessionCell(r: TreeRow, adv: SessionAdvice | undefined): HTMLElement {
       { class: "session-title-line" },
       r.depth > 0 ? h("span", { class: "muted" }, "↳ ") : null,
       sessionLink(r.sessionId, name),
+      r.isArchived ? h("span", { class: "badge ms-1" }, "archived") : null,
       r.relation === "root" || (!hasName && isSubagent)
         ? null
         : h("span", { class: "muted small" }, isSubagent ? " · subagent" : " · side session"),

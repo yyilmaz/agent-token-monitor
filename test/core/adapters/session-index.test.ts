@@ -45,7 +45,7 @@ const FILES: LogFile[] = [
   subagent("main", "a2"),
   meta("main", "a2", ["{ not json"]),
   index("A", { cliSessionId: "main", title: "Main from the app" }),
-  index("B", { cliSessionId: "side1", title: "Fix the parser", spawnedFrom: { sessionId: "local_A", sideSession: true } }),
+  index("B", { cliSessionId: "side1", title: "Fix the parser", isArchived: true, spawnedFrom: { sessionId: "local_A", sideSession: true } }),
   index("C", { cliSessionId: "side2", priorCliSessionIds: ["side2-old"], title: "Write docs", spawnedFrom: { sessionId: "local_A" } }),
   index("D", { cliSessionId: "orphan", title: "Lost parent", spawnedFrom: { sessionId: "local_GONE" } }),
   { logRoot: "claudeCodeIndex:0", file: "acct/org/local_E.json", lines: ["{ not json"] },
@@ -84,6 +84,12 @@ describe("Claude Code session titles and side sessions (ADR 0016)", () => {
 
   it("applies an index entry to the earlier log sessions of the same desktop session", () => {
     assert.deepEqual([byId.get("side2-old")?.title, byId.get("side2-old")?.spawnedBySessionId], ["Write docs", "claudeCode:main"]);
+  });
+
+  it("reads isArchived from the desktop session index and defaults to false (ADR 0016)", () => {
+    assert.equal(byId.get("main")?.isArchived, false);
+    assert.equal(byId.get("side1")?.isArchived, true);
+    assert.equal(byId.get("main/agent-a1")?.isArchived, false);
   });
 
   it("leaves an unresolvable starter null and reports it, as it does an unreadable index or meta file (R-23)", () => {

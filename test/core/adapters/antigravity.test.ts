@@ -219,6 +219,31 @@ describe("Antigravity adapter edge cases", () => {
     };
     const output = parseAntigravity([transcript("c", [planner({ input_tokens: 1, cache_read_tokens: 0, output_tokens: 2 })]), annotation]);
     assert.equal(output.sessions[0]?.title, 'Example "Title" \\n \\t \\" \'ok\'');
+    assert.equal(output.sessions[0]?.isArchived, false);
+  });
+
+  it("reads archived:true from .pbtxt annotation files with or without a title (ADR 0016)", () => {
+    const withTitle: LogFile = {
+      logRoot: "antigravityIndex:0",
+      file: "c1.pbtxt",
+      lines: ['title:"Done" archived:true  last_user_view_time:{seconds:100 nanos:0}'],
+    };
+    const withoutTitle: LogFile = {
+      logRoot: "antigravityIndex:0",
+      file: "c2.pbtxt",
+      lines: ["archived:true  archival_status_timestamp:{seconds:100 nanos:0}"],
+    };
+    const output = parseAntigravity([
+      transcript("c1", [planner({ input_tokens: 1, cache_read_tokens: 0, output_tokens: 2 })]),
+      transcript("c2", [planner({ input_tokens: 1, cache_read_tokens: 0, output_tokens: 2 })]),
+      withTitle,
+      withoutTitle,
+    ]);
+    const byId = new Map(output.sessions.map((s) => [s.nativeId, s]));
+    assert.equal(byId.get("c1")?.title, "Done");
+    assert.equal(byId.get("c1")?.isArchived, true);
+    assert.equal(byId.get("c2")?.title, null);
+    assert.equal(byId.get("c2")?.isArchived, true);
   });
 
   it("falls back to typeName for subagent title, prefers .pbtxt if present, and ignores non-file URIs", () => {

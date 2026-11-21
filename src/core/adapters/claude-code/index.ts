@@ -79,6 +79,7 @@ interface IndexEntry {
   /** The current log session ID first, then earlier ones of the same desktop session. */
   readonly cliSessionIds: readonly string[];
   readonly title: string | null;
+  readonly isArchived: boolean;
   readonly spawnedFromDesktopId: string | null;
   readonly source: SourceRef;
 }
@@ -266,6 +267,7 @@ function readIndexFile(file: LogFile): ClaudeCodeFileResult {
       desktopId: entry["sessionId"],
       cliSessionIds: [entry["cliSessionId"], ...prior.filter((id) => id !== entry["cliSessionId"])],
       title: typeof entry["title"] === "string" && entry["title"] !== "" ? entry["title"] : null,
+      isArchived: entry["isArchived"] === true,
       spawnedFromDesktopId: isObject(spawnedFrom) && typeof spawnedFrom["sessionId"] === "string" ? spawnedFrom["sessionId"] : null,
       source,
     },
@@ -358,6 +360,7 @@ export function combineClaudeCode(results: readonly ClaudeCodeFileResult[]): Ada
       isSubagent: acc.parentNativeId !== null,
       spawnedBySessionId: link?.spawnedBy ?? null,
       title: link?.title ?? acc.title,
+      isArchived: link?.isArchived ?? false,
       projectPath: acc.projectPath,
       sources: acc.sources,
     });
@@ -395,7 +398,7 @@ function sideSessionLinks(
   index: readonly IndexEntry[],
   sessions: ReadonlyMap<string, SessionAcc>,
   diagnose: (severity: Diagnostic["severity"], code: string, message: string, source: SourceRef) => void,
-): Map<string, { readonly title: string | null; readonly spawnedBy: string | null }> {
+): Map<string, { readonly title: string | null; readonly spawnedBy: string | null; readonly isArchived: boolean }> {
   const ordered = [...index].sort((a, b) => compareStrings(a.desktopId, b.desktopId));
   const byDesktopId = new Map(ordered.map((entry) => [entry.desktopId, entry]));
   const owner = new Map<string, IndexEntry>();
@@ -405,7 +408,7 @@ function sideSessionLinks(
       for (const id of ids) if (!owner.has(id)) owner.set(id, entry);
     }
   }
-  const links = new Map<string, { title: string | null; spawnedBy: string | null }>();
+  const links = new Map<string, { title: string | null; spawnedBy: string | null; isArchived: boolean }>();
   for (const [cliId, entry] of [...owner].sort(([a], [b]) => compareStrings(a, b))) {
     if (!sessions.has(cliId)) continue;
     let spawnedBy: string | null = null;
@@ -414,7 +417,7 @@ function sideSessionLinks(
       if (starter !== undefined && starter !== cliId && sessions.has(starter)) spawnedBy = sessionId(starter);
       else diagnose("warning", "unresolvedSideSessionLink", "The session that started this side session is not in the logs; no link is shown.", entry.source);
     }
-    links.set(cliId, { title: entry.title, spawnedBy });
+    links.set(cliId, { title: entry.title, spawnedBy, isArchived: entry.isArchived });
   }
   return links;
 }

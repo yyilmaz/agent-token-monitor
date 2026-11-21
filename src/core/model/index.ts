@@ -32,6 +32,8 @@ export interface Session {
   readonly spawnedBySessionId: string | null;
   /** The session's title as recorded by the harness (ADR 0016), else null. */
   readonly title: string | null;
+  /** Whether the harness marks this session as archived (ADR 0016). */
+  readonly isArchived: boolean;
   /** Working directory as logged; shown and exported as recorded (R-71). */
   readonly projectPath: string | null;
   readonly sources: readonly SourceRef[];

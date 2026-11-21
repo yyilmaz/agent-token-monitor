@@ -29,6 +29,7 @@ function makeSession(id: string, title: string, projectPath: string): Session {
     isSubagent: false,
     spawnedBySessionId: null,
     title,
+    isArchived: false,
     projectPath,
     sources: [{ logRoot: "r:0", file: `${id}.jsonl`, line: 1 }],
   };

@@ -19,6 +19,7 @@ const sess = (id: string, parent: string | null): Session => ({
   isSubagent: parent !== null,
   spawnedBySessionId: null,
   title: null,
+  isArchived: false,
   projectPath: null,
   sources: [],
 });

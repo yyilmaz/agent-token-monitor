@@ -23,7 +23,7 @@ interface Response {
 }
 
 const state: { now: NowState; usage: UsageState; cache: CacheState } = {
-  now: { harness: "", project: "" },
+  now: { harness: "", project: "", showArchived: false },
   usage: { range: 0, where: "harness", harness: "", project: "", chartModes: {} },
   cache: { range: "all", harness: "" },
 };
