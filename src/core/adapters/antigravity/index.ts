@@ -406,12 +406,14 @@ function readAnnotation(file: LogFile, nativeId: string): { readonly nativeId: s
   const text = file.lines.join("\n");
   const match = /\btitle\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(text);
   if (match === null) return null;
-  const title = (match[1] as string)
-    .replace(/\\"/g, "\"")
-    .replace(/\\\\/g, "\\")
-    .replace(/\\n/g, "\n")
-    .replace(/\\t/g, "\t")
-    .trim();
+  let decodedTitle: unknown;
+  try {
+    decodedTitle = JSON.parse(`"${match[1] as string}"`);
+  } catch {
+    return null;
+  }
+  if (typeof decodedTitle !== "string") return null;
+  const title = decodedTitle.trim();
   return title === "" ? null : { nativeId, title };
 }
 
