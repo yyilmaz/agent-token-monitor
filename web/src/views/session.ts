@@ -21,6 +21,26 @@ const CLASS: Readonly<Record<CacheClass, readonly [string, string]>> = {
 
 let trajectoryExpanded = false;
 
+/** Visible timeline row counts per session across dashboard polls (R-32). */
+const timelineRowsShownBySession = new Map<string, number>();
+
+export interface TimelinePageWindow {
+  readonly shown: number;
+  readonly remaining: number;
+  readonly nextBatch: number;
+}
+
+/** Computes how many newest-first timeline rows to render and how many older rows remain behind "Load more" (R-72). */
+export function timelinePageWindow(totalRows: number, requestedShown: number | undefined, pageSize: number): TimelinePageWindow {
+  const safeTotal = Math.max(0, totalRows);
+  const safePageSize = Math.max(1, pageSize);
+  const target = requestedShown ?? safePageSize;
+  const shown = Math.min(safeTotal, Math.max(safePageSize, target));
+  const remaining = Math.max(0, safeTotal - shown);
+  const nextBatch = Math.min(safePageSize, remaining);
+  return { shown, remaining, nextBatch };
+}
+
 export function renderSession(data: SessionData): HTMLElement {
   const s = data.session;
   const w = data.weighted;
@@ -88,16 +108,181 @@ export function renderSession(data: SessionData): HTMLElement {
   activeWindowCard.setAttribute("tabindex", "0");
   activeWindowCard.setAttribute("aria-expanded", String(trajectoryExpanded));
 
+  const timelineHost = h("div", {});
+  const timelineColumns = [
+    {
+      title: "#",
+      help: "Step number in this session (newest step at the top). Hover a row number to see the exact log file and line (R-17).",
+      numeric: true,
+      cell: (r: Row) => {
+        const stepNo = stepNumbers.get(r.call.id) ?? 0;
+        return h(
+          "span",
+          {
+            "data-step-row": String(stepNo),
+            title: r.call.sources.map((src) => `${src.file}:${src.line}`).join(", "),
+          },
+          String(stepNo),
+        );
+      },
+    },
+    {
+      title: "Time",
+      help: "Timestamp recorded in the harness log for this step.",
+      cell: (r: Row) => f.time(r.call.timestamp, data.timeZone),
+    },
+    {
+      title: "Pause",
+      help: "Idle gap since the previous turn in this session (PAIR-1). Long pauses risk expiring the prompt cache.",
+      numeric: true,
+      cell: (r: Row) => (r.cache === null || r.cache.gapSeconds === null ? "—" : f.duration(r.cache.gapSeconds)),
+    },
+    {
+      title: "Actions / Tools",
+      help: "Tools invoked by the model on this turn (edit, read/search, command, subagent), or compaction.",
+      cell: (r: Row) => renderTools(r),
+    },
+    {
+      title: "Context",
+      help: "Total input context sent on this step (Context = From cache + Cache write + New input), and change from the previous step.",
+      numeric: true,
+      cell: (r: Row) => {
+        const ctx = contextOf(r);
+        const delta = deltas.get(r.call.id) ?? null;
+        const deltaText =
+          delta === null || delta === 0
+            ? null
+            : h("span", { class: "muted small" }, ` (${delta > 0 ? "+" : "−"}${f.compactTokens(Math.abs(delta))})`);
+        return h("span", {}, f.tokensShort(ctx), deltaText);
+      },
+    },
+    {
+      title: "Cache",
+      help: "How much of the previous step's context was read from cache (CLS-1): kept (full hit), partly kept (≥75% kept), or lost (<75% kept).",
+      cell: (r: Row) => {
+        if (r.cache === null) return "";
+        const [baseText, tone] = r.cache.cacheLoss ? (["lost", "bad"] as const) : CLASS[r.cache.class];
+        const ctx = contextOf(r);
+        const eligible = r.cache.prefixTokens !== null && ctx !== null ? Math.min(r.cache.prefixTokens, ctx) : null;
+        const pct =
+          eligible !== null && eligible > 0 && r.call.cacheRead !== null && (r.cache.class === "hit" || r.cache.class === "partial" || r.cache.class === "fullMiss")
+            ? ` (${Math.min(100, Math.round((r.call.cacheRead / eligible) * 100))}%)`
+            : "";
+        const tooltip =
+          eligible !== null && r.call.cacheRead !== null
+            ? `CLS-1 · ${r.cache.class} · read ${f.tokens(r.call.cacheRead)} of ${f.tokens(eligible)} prior context (${f.tokens(r.cache.reReadTokens)} re-read)`
+            : `CLS-1 · ${r.cache.class}`;
+        const cause = r.cache.cause?.cause;
+        const causeText = cause === undefined ? null : h("span", { class: "muted small", title: f.CAUSE[cause][1] }, ` · ${f.CAUSE[cause][0]}`);
+        return h("span", {}, h("span", { class: `badge ${tone}`, title: tooltip }, `${baseText}${pct}`), causeText);
+      },
+    },
+    {
+      title: "From cache",
+      help: "Tokens read directly from the provider's prompt cache.",
+      numeric: true,
+      cell: (r: Row) => f.tokensShort(r.call.cacheRead),
+    },
+    {
+      title: "Cache write",
+      help: "Tokens newly written into the prompt cache. Antigravity logs 0 here and counts them under New input.",
+      numeric: true,
+      cell: (r: Row) => f.tokensShort(r.call.cacheWrite),
+    },
+    {
+      title: "New input",
+      help: "Uncached input tokens sent on this step.",
+      numeric: true,
+      cell: (r: Row) => f.tokensShort(r.call.inputUncached),
+    },
+    {
+      title: "Re-read",
+      help: "Portion of New input / Cache write from the previous step's context that missed the cache and had to be re-read (reReadTokens).",
+      numeric: true,
+      cell: (r: Row) => (r.cache === null || r.cache.reReadTokens === null || r.cache.reReadTokens === 0 ? "—" : f.tokensShort(r.cache.reReadTokens)),
+    },
+    {
+      title: "Output",
+      help: "Tokens generated by the model on this step.",
+      numeric: true,
+      cell: (r: Row) => f.tokensShort(r.call.output),
+    },
+    {
+      title: "Weighted",
+      help: `Weighted step load = ${weights.cacheRead}×From cache + ${weights.cacheWrite}×Cache write + ${weights.inputUncached}×New input + ${weights.output}×Output. Lets you compare token load across turns, compactions and subagents.`,
+      numeric: true,
+      cell: (r: Row) =>
+        r.weightedTokens === null
+          ? "—"
+          : h("strong", { title: `${f.tokens(r.weightedTokens)} weighted units` }, f.compactTokens(r.weightedTokens)),
+    },
+  ];
+
+  const pageSize = data.configuration.ui.sessionStepsShown;
+  const renderTimeline = () => {
+    const { shown, remaining, nextBatch } = timelinePageWindow(newestFirstCalls.length, timelineRowsShownBySession.get(s.id), pageSize);
+    const footer =
+      remaining > 0
+        ? [
+            (() => {
+              const btn = h("button", { type: "button", class: "btn btn-sm" }, `Load ${nextBatch} more (${remaining} older)`);
+              btn.addEventListener("click", () => {
+                timelineRowsShownBySession.set(s.id, shown + nextBatch);
+                renderTimeline();
+              });
+              return h(
+                "div",
+                { class: "d-flex align-items-center justify-content-between gap-2 mt-2" },
+                h("span", { class: "muted small" }, `Showing newest ${shown} of ${newestFirstCalls.length} steps`),
+                btn,
+              );
+            })(),
+          ]
+        : [];
+    const preserveScroll = timelineHost.isConnected;
+    const scrollX = preserveScroll ? window.scrollX : 0;
+    const scrollY = preserveScroll ? window.scrollY : 0;
+    timelineHost.replaceChildren(
+      table(
+        timelineColumns,
+        newestFirstCalls.slice(0, shown),
+        "Nothing to show.",
+        (r) => (r.call.kind === "compaction" ? "compaction-row" : r.cache?.cacheLoss ? "loss-row" : null),
+        "session-timeline",
+      ),
+      ...footer,
+    );
+    if (preserveScroll) window.scrollTo(scrollX, scrollY);
+  };
+  renderTimeline();
+
+  const ensureStepVisible = (stepNo: number) => {
+    const idx = newestFirstCalls.length - stepNo;
+    if (idx < 0 || idx >= newestFirstCalls.length) return;
+    const { shown } = timelinePageWindow(newestFirstCalls.length, timelineRowsShownBySession.get(s.id), pageSize);
+    if (idx >= shown) {
+      timelineRowsShownBySession.set(s.id, idx + 1);
+      renderTimeline();
+    }
+  };
+
   const syncExpandedTrajectory = () => {
     activeWindowCard.classList.toggle("is-expanded", trajectoryExpanded);
     activeWindowCard.setAttribute("aria-expanded", String(trajectoryExpanded));
     toggleHint.textContent = trajectoryExpanded ? "⤡ Hide chart" : "⤢ Expand chart";
     trajectoryHost.replaceChildren();
     if (trajectoryExpanded) {
-      const panel = renderExpandedTrajectory(data, stepNumbers, deltas, contextOf, () => {
-        trajectoryExpanded = false;
-        syncExpandedTrajectory();
-      });
+      const panel = renderExpandedTrajectory(
+        data,
+        stepNumbers,
+        deltas,
+        contextOf,
+        () => {
+          trajectoryExpanded = false;
+          syncExpandedTrajectory();
+        },
+        ensureStepVisible,
+      );
       if (panel !== null) trajectoryHost.append(panel);
     }
   };
@@ -183,120 +368,7 @@ export function renderSession(data: SessionData): HTMLElement {
     ),
     trajectoryHost,
     h("h2", {}, "Step-by-step timeline"),
-    table(
-      [
-        {
-          title: "#",
-          help: "Step number in this session (newest step at the top). Hover a row number to see the exact log file and line (R-17).",
-          numeric: true,
-          cell: (r: Row) => {
-            const stepNo = stepNumbers.get(r.call.id) ?? 0;
-            return h(
-              "span",
-              {
-                "data-step-row": String(stepNo),
-                title: r.call.sources.map((src) => `${src.file}:${src.line}`).join(", "),
-              },
-              String(stepNo),
-            );
-          },
-        },
-        {
-          title: "Time",
-          help: "Timestamp recorded in the harness log for this step.",
-          cell: (r) => f.time(r.call.timestamp, data.timeZone),
-        },
-        {
-          title: "Pause",
-          help: "Idle gap since the previous turn in this session (PAIR-1). Long pauses risk expiring the prompt cache.",
-          numeric: true,
-          cell: (r) => (r.cache === null || r.cache.gapSeconds === null ? "—" : f.duration(r.cache.gapSeconds)),
-        },
-        {
-          title: "Actions / Tools",
-          help: "Tools invoked by the model on this turn (edit, read/search, command, subagent), or compaction.",
-          cell: (r) => renderTools(r),
-        },
-        {
-          title: "Context",
-          help: "Total input context sent on this step (Context = From cache + Cache write + New input), and change from the previous step.",
-          numeric: true,
-          cell: (r) => {
-            const ctx = contextOf(r);
-            const delta = deltas.get(r.call.id) ?? null;
-            const deltaText =
-              delta === null || delta === 0
-                ? null
-                : h("span", { class: "muted small" }, ` (${delta > 0 ? "+" : "−"}${f.compactTokens(Math.abs(delta))})`);
-            return h("span", {}, f.tokensShort(ctx), deltaText);
-          },
-        },
-        {
-          title: "Cache",
-          help: "How much of the previous step's context was read from cache (CLS-1): kept (full hit), partly kept (≥75% kept), or lost (<75% kept).",
-          cell: (r) => {
-            if (r.cache === null) return "";
-            const [baseText, tone] = r.cache.cacheLoss ? (["lost", "bad"] as const) : CLASS[r.cache.class];
-            const ctx = contextOf(r);
-            const eligible = r.cache.prefixTokens !== null && ctx !== null ? Math.min(r.cache.prefixTokens, ctx) : null;
-            const pct =
-              eligible !== null && eligible > 0 && r.call.cacheRead !== null && (r.cache.class === "hit" || r.cache.class === "partial" || r.cache.class === "fullMiss")
-                ? ` (${Math.min(100, Math.round((r.call.cacheRead / eligible) * 100))}%)`
-                : "";
-            const tooltip =
-              eligible !== null && r.call.cacheRead !== null
-                ? `CLS-1 · ${r.cache.class} · read ${f.tokens(r.call.cacheRead)} of ${f.tokens(eligible)} prior context (${f.tokens(r.cache.reReadTokens)} re-read)`
-                : `CLS-1 · ${r.cache.class}`;
-            const cause = r.cache.cause?.cause;
-            const causeText = cause === undefined ? null : h("span", { class: "muted small", title: f.CAUSE[cause][1] }, ` · ${f.CAUSE[cause][0]}`);
-            return h("span", {}, h("span", { class: `badge ${tone}`, title: tooltip }, `${baseText}${pct}`), causeText);
-          },
-        },
-        {
-          title: "From cache",
-          help: "Tokens read directly from the provider's prompt cache.",
-          numeric: true,
-          cell: (r) => f.tokensShort(r.call.cacheRead),
-        },
-        {
-          title: "Cache write",
-          help: "Tokens newly written into the prompt cache. Antigravity logs 0 here and counts them under New input.",
-          numeric: true,
-          cell: (r) => f.tokensShort(r.call.cacheWrite),
-        },
-        {
-          title: "New input",
-          help: "Uncached input tokens sent on this step.",
-          numeric: true,
-          cell: (r) => f.tokensShort(r.call.inputUncached),
-        },
-        {
-          title: "Re-read",
-          help: "Portion of New input / Cache write from the previous step's context that missed the cache and had to be re-read (reReadTokens).",
-          numeric: true,
-          cell: (r) => (r.cache === null || r.cache.reReadTokens === null || r.cache.reReadTokens === 0 ? "—" : f.tokensShort(r.cache.reReadTokens)),
-        },
-        {
-          title: "Output",
-          help: "Tokens generated by the model on this step.",
-          numeric: true,
-          cell: (r) => f.tokensShort(r.call.output),
-        },
-        {
-          title: "Weighted",
-          help: `Weighted step load = ${weights.cacheRead}×From cache + ${weights.cacheWrite}×Cache write + ${weights.inputUncached}×New input + ${weights.output}×Output. Lets you compare token load across turns, compactions and subagents.`,
-          numeric: true,
-          cell: (r) =>
-            r.weightedTokens === null
-              ? "—"
-              : h("strong", { title: `${f.tokens(r.weightedTokens)} weighted units` }, f.compactTokens(r.weightedTokens)),
-        },
-      ],
-      newestFirstCalls,
-      "Nothing to show.",
-      (r) => (r.call.kind === "compaction" ? "compaction-row" : r.cache?.cacheLoss ? "loss-row" : null),
-      "session-timeline",
-    ),
+    timelineHost,
   );
 }
 
@@ -439,6 +511,7 @@ function renderExpandedTrajectory(
   deltas: ReadonlyMap<string, number | null>,
   contextOf: (r: Row) => number | null,
   onClose: () => void,
+  onBeforeScroll?: (stepNo: number) => void,
 ): HTMLElement | null {
   const calls = data.calls;
   if (calls.length === 0) return null;
@@ -585,6 +658,7 @@ function renderExpandedTrajectory(
   let pinnedIdx: number | null = null;
 
   const scrollToStepRow = (stepNo: number) => {
+    onBeforeScroll?.(stepNo);
     const cell = document.querySelector(`[data-step-row="${stepNo}"]`);
     const tr = cell?.closest("tr");
     if (tr instanceof HTMLElement) {
@@ -906,50 +980,84 @@ function renderEfficiencyMini(calls: readonly Row[], w: SessionData["weighted"],
 /** Sessions whose subagent table the user expanded; the dashboard redraws on every poll, so the state lives here (R-32). */
 const expandedSubagentTables = new Set<string>();
 
-/** ADR 0016: the session's subagents as a table, newest first, `ui.subagentRowsShown` rows until "Show more". */
+/** Splits subagent IDs (already newest-first) into active (LIVE-1 open window) and inactive. */
+export function partitionSubagents(
+  ids: readonly string[],
+  lastCallAt: Readonly<Record<string, number | null>>,
+  asOf: number,
+  openWithinSeconds: number,
+): { readonly active: string[]; readonly inactive: string[] } {
+  const active: string[] = [];
+  const inactive: string[] = [];
+  for (const id of ids) {
+    const at = lastCallAt[id];
+    if (at !== null && at !== undefined && (asOf - at) / 1000 <= openWithinSeconds) {
+      active.push(id);
+    } else {
+      inactive.push(id);
+    }
+  }
+  return { active, inactive };
+}
+
+/** ADR 0016: the session's subagents as a table, newest first; active ones shown at the top, inactive ones hidden until expanded. */
 function subagentTable(data: SessionData): HTMLElement {
   const ids = data.children;
-  const initial = data.configuration.ui.subagentRowsShown;
+  const { active, inactive } = partitionSubagents(
+    ids,
+    data.subagentLastCallAt,
+    data.asOf,
+    data.configuration.liveView.openWithinSeconds,
+  );
   const container = h("div", { class: "subagents" });
   const key = data.session.id;
   const render = () => {
     const expanded = expandedSubagentTables.has(key);
-    const shown = expanded ? ids : ids.slice(0, initial);
+    const shown = expanded ? ids : active;
+    const preserveScroll = container.isConnected;
+    const scrollX = preserveScroll ? window.scrollX : 0;
+    const scrollY = preserveScroll ? window.scrollY : 0;
     container.replaceChildren(
-      h("p", { class: "small" }, `Subagents spawned by this session (${ids.length}), newest first:`),
-      table(
-        [
-          { title: "Subagent", cell: (id: string) => sessionLink(id, data.titles[id] ?? f.shortSessionId(id, true)) },
-          {
-            title: "Last call",
-            cell: (id: string) => {
-              const at = data.subagentLastCallAt[id];
-              return at === null || at === undefined ? "–" : f.time(at, data.timeZone);
-            },
-          },
-          { title: "Steps", numeric: true, cell: (id: string) => String(data.subagentSummaries[id]?.totalTurns ?? "–") },
-          {
-            title: "Units",
-            numeric: true,
-            cell: (id: string) => {
-              const sub = data.subagentSummaries[id];
-              return sub === undefined ? "–" : f.compactTokens(sub.sessionWeightedTokens);
-            },
-          },
-          {
-            title: "Units / step",
-            numeric: true,
-            cell: (id: string) => {
-              const avg = data.subagentSummaries[id]?.allTimeAvgWeightedTokens;
-              return avg === null || avg === undefined ? "–" : f.compactTokens(avg);
-            },
-          },
-        ],
-        shown,
-      ),
-      ...(ids.length > initial
+      h("p", { class: "small" }, `Subagents spawned by this session (${ids.length}; ${active.length} active), newest first:`),
+      ...(shown.length > 0
+        ? [
+            table(
+              [
+                { title: "Subagent", cell: (id: string) => sessionLink(id, data.titles[id] ?? f.shortSessionId(id, true)) },
+                {
+                  title: "Last call",
+                  cell: (id: string) => {
+                    const at = data.subagentLastCallAt[id];
+                    return at === null || at === undefined ? "–" : f.time(at, data.timeZone);
+                  },
+                },
+                { title: "Steps", numeric: true, cell: (id: string) => String(data.subagentSummaries[id]?.totalTurns ?? "–") },
+                {
+                  title: "Units",
+                  numeric: true,
+                  cell: (id: string) => {
+                    const sub = data.subagentSummaries[id];
+                    return sub === undefined ? "–" : f.compactTokens(sub.sessionWeightedTokens);
+                  },
+                },
+                {
+                  title: "Units / step",
+                  numeric: true,
+                  cell: (id: string) => {
+                    const avg = data.subagentSummaries[id]?.allTimeAvgWeightedTokens;
+                    return avg === null || avg === undefined ? "–" : f.compactTokens(avg);
+                  },
+                },
+              ],
+              shown,
+            ),
+          ]
+        : []),
+      ...(inactive.length > 0
         ? [(() => {
-            const btn = h("button", { type: "button", class: "btn btn-sm" }, expanded ? "Show fewer" : `Show ${ids.length - initial} more`);
+            const noun = inactive.length === 1 ? "subagent" : "subagents";
+            const label = expanded ? `Hide ${inactive.length} inactive ${noun}` : `Show ${inactive.length} inactive ${noun}`;
+            const btn = h("button", { type: "button", class: "btn btn-sm" }, label);
             btn.addEventListener("click", () => {
               if (expanded) expandedSubagentTables.delete(key);
               else expandedSubagentTables.add(key);
@@ -959,6 +1067,7 @@ function subagentTable(data: SessionData): HTMLElement {
           })()]
         : []),
     );
+    if (preserveScroll) window.scrollTo(scrollX, scrollY);
   };
   render();
   return container;

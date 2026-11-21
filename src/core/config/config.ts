@@ -61,6 +61,8 @@ export const configSchema = object({
     subagentRowsShown: integer(1),
     // ADR 0013: log locations the Diagnostics view lists per group before the rest are only counted (R-23).
     diagnosticLocationsShown: integer(1),
+    // Step-by-step timeline rows shown initially and per "Load more" batch in the session view (R-72).
+    sessionStepsShown: integer(1),
   }),
 });
 

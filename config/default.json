@@ -82,6 +82,7 @@
     "pollIntervalSeconds": 5,
     "usageRangesDays": [7, 30],
     "subagentRowsShown": 10,
-    "diagnosticLocationsShown": 5
+    "diagnosticLocationsShown": 5,
+    "sessionStepsShown": 200
   }
 }

@@ -30,6 +30,12 @@ export interface HarnessSource {
   readonly files: number;
 }
 
+/** Background history loading progress during active-first startup (ADR 0024). */
+export interface HistoryLoadingStatus {
+  readonly loadedFiles: number;
+  readonly totalFiles: number;
+}
+
 export interface Analysis {
   readonly data: AdapterOutput;
   readonly sources: readonly HarnessSource[];
@@ -38,10 +44,17 @@ export interface Analysis {
   readonly cache: CacheAnalysis;
   readonly diagnosticCounts: ReturnType<typeof diagnosticCounts>;
   readonly calls: readonly UsageCall[];
+  readonly historyLoading?: HistoryLoadingStatus;
 }
 
 /** Everything that does not depend on the "as of" time. */
-export function analyze(data: AdapterOutput, config: Config, timeZone: string, sources: readonly HarnessSource[] = []): Analysis {
+export function analyze(
+  data: AdapterOutput,
+  config: Config,
+  timeZone: string,
+  sources: readonly HarnessSource[] = [],
+  historyLoading?: HistoryLoadingStatus,
+): Analysis {
   const cache = analyzeCache(data, config);
   const ordered = [...data.calls].sort((a, b) => compareByTimeThenSource(a, b) || compareStrings(a.id, b.id));
   return {
@@ -52,6 +65,7 @@ export function analyze(data: AdapterOutput, config: Config, timeZone: string, s
     cache,
     diagnosticCounts: diagnosticCounts(data.diagnostics),
     calls: usageCalls(ordered, data.sessions, config),
+    ...(historyLoading === undefined ? {} : { historyLoading }),
   };
 }
 
@@ -61,6 +75,7 @@ interface Envelope {
   readonly timeZone: string;
   readonly configuration: Config;
   readonly diagnosticCount: number;
+  readonly historyLoading?: HistoryLoadingStatus;
 }
 
 const envelope = (analysis: Analysis, asOf: EpochMillis): Envelope => ({
@@ -68,6 +83,7 @@ const envelope = (analysis: Analysis, asOf: EpochMillis): Envelope => ({
   timeZone: analysis.timeZone,
   configuration: analysis.config,
   diagnosticCount: analysis.diagnosticCounts.errors + analysis.diagnosticCounts.warnings,
+  ...(analysis.historyLoading === undefined ? {} : { historyLoading: analysis.historyLoading }),
 });
 
 /** Every response when the configuration is invalid: errors and no results (ADR 0007). */
