@@ -224,3 +224,17 @@ export function card(label: string, value: Child, ...notes: Child[]): HTMLElemen
 export function sessionLink(sessionId: string, text: string = sessionId): HTMLElement {
   return h("a", { href: `#session/${encodeURIComponent(sessionId)}`, title: sessionId }, text);
 }
+
+/** Segmented button group (`btn-group segmented`) for mutually exclusive filter/range toggles. */
+export function segmented(options: readonly (readonly [string, string])[], value: string, change: (value: string) => void): HTMLElement {
+  return h(
+    "div",
+    { class: "btn-group segmented", role: "group" },
+    options.map(([v, label]) => {
+      const active = v === value;
+      const button = h("button", { type: "button", class: active ? "btn btn-sm active" : "btn btn-sm", "aria-pressed": String(active) }, label);
+      button.addEventListener("click", () => change(v));
+      return button;
+    }),
+  );
+}

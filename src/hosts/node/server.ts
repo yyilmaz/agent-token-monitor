@@ -95,7 +95,17 @@ export async function dispatchApi(endpoint: string, store: AnalysisStore, nowFn:
     }
     return { status: 200, body: api.usage(analysis, now, by) };
   }
-  if (route === "cache") return { status: 200, body: api.cache(analysis, now) };
+  if (route === "cache") {
+    const daysParam = url.searchParams.get("days");
+    if (daysParam === null || daysParam === "" || daysParam === "all") {
+      return { status: 200, body: api.cache(analysis, now) };
+    }
+    const days = Number(daysParam);
+    if (!Number.isSafeInteger(days) || days < 1) {
+      return { status: 400, body: { error: "days must be all or a positive integer" } };
+    }
+    return { status: 200, body: api.cache(analysis, now, days) };
+  }
   if (route === "diagnostics") return { status: 200, body: api.diagnostics(analysis, now) };
   if (route.startsWith("sessions/")) {
     const result = api.session(analysis, now, decodeURIComponent(route.slice("sessions/".length)));

@@ -105,6 +105,17 @@ export interface CacheAnalysis {
   readonly declared: readonly DeclaredGroup[];
 }
 
+/** One survival observation used to build LIFE-1 lifetime groups and gap bands. */
+export interface LifetimeSample {
+  readonly harness: HarnessId;
+  readonly model: string;
+  readonly modelSource: ModelSource;
+  readonly declaredLifetimeSeconds: number | null;
+  readonly gapMillis: number;
+  readonly observation: "survived" | "gone";
+  readonly call: Ordered;
+}
+
 export interface CacheInput {
   readonly sessions: readonly Session[];
   readonly calls: readonly Call[];
@@ -169,7 +180,22 @@ export function analyzeCache(input: CacheInput, settings: CacheAnalysisConfig): 
 
   // Canonical call order for the result (ADR 0008 rule 7).
   pairs.sort((a, b) => compareByTimeThenSource(a.call, b.call) || compareStrings(a.call.id, b.call.id));
-  const lifetimes = lifetimeGroups(pairs, config);
+  const lifetimes = lifetimeGroups(
+    pairs.flatMap((pair): LifetimeSample[] =>
+      pair.observation === null
+        ? []
+        : [{
+            harness: pair.harness,
+            model: pair.model.name as string,
+            modelSource: pair.model.source as ModelSource,
+            declaredLifetimeSeconds: pair.declared,
+            gapMillis: pair.gapMillis as number,
+            observation: pair.observation,
+            call: pair.call,
+          }],
+    ),
+    config,
+  );
   const median = new Map(lifetimes.map((g) => [declaredKey(groupKey(g.harness, g.model, g.modelSource), g.declaredLifetimeSeconds), g.medianSeconds]));
 
   const calls = pairs.map((pair): CallCacheResult => ({
@@ -330,30 +356,53 @@ function missCause(pair: Pair, median: ReadonlyMap<string, number | null>, confi
   return { rule: "CAUSE-1", cause, referenceLifetimeSeconds: seconds, referenceSource: source };
 }
 
-function lifetimeGroups(pairs: readonly Pair[], config: CacheConfig): LifetimeGroup[] {
-  const groups = new Map<string, Pair[]>();
-  for (const pair of pairs) {
-    if (pair.observation === null) continue;
-    const key = declaredKey(pairKey(pair), pair.declared);
+/** Builds LIFE-1 lifetime groups and gap bands from already-paired call results (e.g. for a filtered time window). */
+export function lifetimeGroupsFromResults(
+  results: readonly CallCacheResult[],
+  callById: ReadonlyMap<string, Ordered>,
+  config: CacheConfig,
+): LifetimeGroup[] {
+  const samples: LifetimeSample[] = [];
+  for (const r of results) {
+    if (r.observation === null || r.model === null || r.modelSource === null || r.gapSeconds === null) continue;
+    const call = callById.get(r.callId);
+    if (call === undefined) continue;
+    samples.push({
+      harness: r.harness,
+      model: r.model,
+      modelSource: r.modelSource,
+      declaredLifetimeSeconds: r.declaredLifetimeSeconds,
+      gapMillis: r.gapSeconds * 1000,
+      observation: r.observation,
+      call,
+    });
+  }
+  return lifetimeGroups(samples, config);
+}
+
+function lifetimeGroups(samples: readonly LifetimeSample[], config: CacheConfig): LifetimeGroup[] {
+  const groups = new Map<string, LifetimeSample[]>();
+  for (const sample of samples) {
+    const key = declaredKey(groupKey(sample.harness, sample.model, sample.modelSource), sample.declaredLifetimeSeconds);
     const list = groups.get(key);
-    if (list === undefined) groups.set(key, [pair]);
-    else list.push(pair);
+    if (list === undefined) groups.set(key, [sample]);
+    else list.push(sample);
   }
 
   const result: LifetimeGroup[] = [];
-  for (const [key, list] of [...groups].sort(([a], [b]) => compareStrings(a, b))) {
-    list.sort((a, b) => (a.gapMillis as number) - (b.gapMillis as number) || compareByTimeThenSource(a.call, b.call));
-    const survivedGaps = list.filter((p) => p.observation === "survived").map((p) => p.gapMillis as number);
-    const goneGaps = list.filter((p) => p.observation === "gone").map((p) => p.gapMillis as number);
-    const distribution = lifetimeDistribution(list.map((p) => ({ gapMillis: p.gapMillis as number, gone: p.observation === "gone" })));
+  for (const [, list] of [...groups].sort(([a], [b]) => compareStrings(a, b))) {
+    list.sort((a, b) => a.gapMillis - b.gapMillis || compareByTimeThenSource(a.call, b.call));
+    const survivedGaps = list.filter((p) => p.observation === "survived").map((p) => p.gapMillis);
+    const goneGaps = list.filter((p) => p.observation === "gone").map((p) => p.gapMillis);
+    const distribution = lifetimeDistribution(list.map((p) => ({ gapMillis: p.gapMillis, gone: p.observation === "gone" })));
     const sufficient = list.length >= config.minLifetimeObservations && survivedGaps.length > 0 && goneGaps.length > 0;
-    const first = list[0] as Pair;
+    const first = list[0] as LifetimeSample;
     result.push({
       rule: "LIFE-1",
       harness: first.harness,
-      model: first.model.name as string,
-      modelSource: first.model.source as ModelSource,
-      declaredLifetimeSeconds: first.declared,
+      model: first.model,
+      modelSource: first.modelSource,
+      declaredLifetimeSeconds: first.declaredLifetimeSeconds,
       survived: survivedGaps.length,
       gone: goneGaps.length,
       longestSurvivedSeconds: survivedGaps.length === 0 ? null : Math.max(...survivedGaps) / 1000,
@@ -367,12 +416,12 @@ function lifetimeGroups(pairs: readonly Pair[], config: CacheConfig): LifetimeGr
   return result;
 }
 
-function gapBands(pairs: readonly Pair[], edges: readonly number[]): GapBand[] {
+function gapBands(samples: readonly LifetimeSample[], edges: readonly number[]): GapBand[] {
   const bounds = [0, ...edges];
   return bounds.map((from, index) => {
     const to = index + 1 < bounds.length ? (bounds[index + 1] as number) : null;
-    const inBand = pairs.filter((p) => {
-      const gap = p.gapMillis as number;
+    const inBand = samples.filter((p) => {
+      const gap = p.gapMillis;
       return gap >= from * 1000 && (to === null || gap < to * 1000);
     });
     return {

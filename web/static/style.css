@@ -6,6 +6,7 @@
   --muted: #6b6b70;
   --border: #e3e3e0;
   --accent: #2f5bd3;
+  --step-load: #6d28d9;
   --good: #1f7a4d;
   --warn: #9a6200;
   --bad: #b3261e;
@@ -26,6 +27,7 @@
   --muted: #9a9aa2;
   --border: #2e2e33;
   --accent: #8aa8ff;
+  --step-load: #c09eff;
   --good: #5cc28f;
   --warn: #e0a64a;
   --bad: #ff7b72;
@@ -133,7 +135,12 @@ a { color: var(--accent); text-underline-offset: 0.18em; }
 }
 
 .badge.step-load-value {
-  --badge-tone: var(--accent);
+  --badge-tone: var(--step-load);
+  --bs-badge-font-size: 0.9375rem;
+  --bs-badge-font-weight: 700;
+  --bs-badge-padding-x: 0.65em;
+  --bs-badge-padding-y: 0.35em;
+  --bs-badge-bg: color-mix(in srgb, var(--badge-tone) 14%, var(--surface));
   font-variant-numeric: tabular-nums;
 }
 
@@ -166,6 +173,9 @@ a { color: var(--accent); text-underline-offset: 0.18em; }
 .tree[data-depth="6"] { padding-left: 96px; }
 
 /* Cache view: kept/lost bars per pause length. <progress> carries the ratio, since the CSP forbids inline widths. */
+.cache-harness-header { padding-bottom: 0.375rem; border-bottom: 1px solid var(--border); }
+.cache-tier.pt-3 { border-top: 1px solid var(--border); }
+.cache-tier-value { font-size: 1.125rem; font-weight: 650; font-variant-numeric: tabular-nums; }
 .bands { grid-template-columns: max-content minmax(0, 1fr) max-content; }
 progress.progress {
   --bs-progress-height: 0.5rem;
@@ -250,6 +260,37 @@ dialog.advice-drawer .drawer-body {
   }
 }
 .tools-cell { white-space: normal; max-width: 340px; }
+
+/* Session timeline: compact columns so all 12 columns fit horizontally without scrolling (R-17). */
+.table-session-timeline .table {
+  --bs-table-cell-padding-x: 0.375rem;
+  --bs-table-cell-padding-y: 0.35rem;
+  font-size: 0.8125rem;
+}
+.table-session-timeline .table thead th {
+  font-size: 0.75rem;
+}
+.table-session-timeline .tools-cell {
+  max-width: 210px;
+}
+.table-session-timeline .tools-cell .badge {
+  --bs-badge-font-size: 0.6875rem;
+  --bs-badge-padding-x: 0.4em;
+  --bs-badge-padding-y: 0.2em;
+}
+.table-session-timeline .cache-cell {
+  white-space: normal;
+  max-width: 145px;
+  line-height: 1.25;
+}
+.table-session-timeline .context-cell {
+  line-height: 1.2;
+}
+.table-session-timeline .badge.step-load-value {
+  --bs-badge-font-size: 0.8125rem;
+  --bs-badge-padding-x: 0.45em;
+  --bs-badge-padding-y: 0.2em;
+}
 
 .accordion {
   --bs-accordion-bg: var(--surface);

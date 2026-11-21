@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { analyzeCache, type CacheConfig, type CacheInput } from "../../../src/core/analysis/cache.js";
+import { analyzeCache, type CacheConfig, type CacheInput, lifetimeGroupsFromResults } from "../../../src/core/analysis/cache.js";
 import { lifetimeDistribution, medianLifetimeSeconds } from "../../../src/core/analysis/lifetime.js";
 import type { Call, Event, HarnessId, Session } from "../../../src/core/model/index.js";
 
@@ -425,5 +425,23 @@ describe("cache analysis determinism (R-10)", () => {
     ];
     const sessions = [session("s"), session("t", "antigravity")];
     assert.deepEqual(result(input([...calls].reverse(), [], [...sessions].reverse())), result(input(calls, [], sessions)));
+  });
+});
+
+describe("lifetimeGroupsFromResults (windowed cache view)", () => {
+  it("rebuilds LIFE-1 groups for a filtered subset of paired results without breaking prior pairs", () => {
+    const calls = [
+      call({ id: "a", at: 0, uncached: 30000 }),
+      call({ id: "b", at: 100, read: 30000 }),
+      call({ id: "c", at: 86_500, uncached: 30000 }),
+      call({ id: "d", at: 86_550, read: 30000 }),
+    ];
+    const full = result(input(calls));
+    const callById = new Map(calls.map((c) => [c.id, c]));
+    const recentOnly = full.calls.filter((r) => r.callId === "c" || r.callId === "d");
+    const groups = lifetimeGroupsFromResults(recentOnly, callById, CONFIG);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0]?.survived, 1);
+    assert.equal(groups[0]?.gone, 1);
   });
 });

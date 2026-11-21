@@ -6,7 +6,7 @@ import { antigravityCapabilities } from "../adapters/antigravity/index.js";
 import { claudeCodeCapabilities } from "../adapters/claude-code/index.js";
 import { codexCapabilities } from "../adapters/codex/index.js";
 import { callWeightedTokens, sessionAdvice, sessionWeightedSummary, type SessionWeightedSummary, tokenWeightsOf } from "../analysis/advice.js";
-import { analyzeCache, type CacheAnalysis, type MissCauseKind, type ModelSource } from "../analysis/cache.js";
+import { analyzeCache, type CacheAnalysis, lifetimeGroupsFromResults, type MissCauseKind, type ModelSource } from "../analysis/cache.js";
 import { groupDiagnostics } from "../analysis/diagnostics.js";
 import { openSessions, sessionTree } from "../analysis/live.js";
 import { dayIn, type UsageCall, usageCalls, type UsagePeriodKind, usageTotals } from "../analysis/usage.js";
@@ -141,9 +141,24 @@ export interface CauseTotal {
   readonly reReadUnknown: number;
 }
 
-export function cache(analysis: Analysis, asOf: EpochMillis) {
+export function cache(analysis: Analysis, asOf: EpochMillis, days: number | null = null) {
+  let filteredCalls = analysis.cache.calls;
+  let lifetimes = analysis.cache.lifetimes;
+  if (days !== null) {
+    const today = dayIn(asOf, analysis.timeZone);
+    const base = Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1, Number(today.slice(8, 10)));
+    const fromDay = new Date(base - (days - 1) * 86_400_000).toISOString().slice(0, 10);
+    const callById = new Map(analysis.data.calls.map((c) => [c.id, c]));
+    filteredCalls = analysis.cache.calls.filter((r) => {
+      const call = callById.get(r.callId);
+      if (call === undefined) return false;
+      const day = dayIn(call.timestamp, analysis.timeZone);
+      return day >= fromDay && day <= today;
+    });
+    lifetimes = lifetimeGroupsFromResults(filteredCalls, callById, analysis.config.cache);
+  }
   const totals = new Map<string, { harness: HarnessId; model: string | null; modelSource: ModelSource | null; cause: MissCauseKind; losses: number; reReadTokens: number; reReadUnknown: number }>();
-  for (const call of analysis.cache.calls) {
+  for (const call of filteredCalls) {
     if (call.cause === null) continue;
     const key = JSON.stringify([call.harness, call.model, call.modelSource, call.cause.cause]);
     let total = totals.get(key);
@@ -156,7 +171,7 @@ export function cache(analysis: Analysis, asOf: EpochMillis) {
     else total.reReadTokens += call.reReadTokens;
   }
   const causes: CauseTotal[] = [...totals].sort(([a], [b]) => compareStrings(a, b)).map(([, t]) => t);
-  return { ...envelope(analysis, asOf), lifetimes: analysis.cache.lifetimes, declared: analysis.cache.declared, causes };
+  return { ...envelope(analysis, asOf), days, sources: analysis.sources, lifetimes, declared: analysis.cache.declared, causes };
 }
 
 export function session(analysis: Analysis, asOf: EpochMillis, sessionId: string) {

@@ -143,6 +143,10 @@ describe("standalone server", () => {
       assert.doesNotMatch(result.body, /"(pricing|currency|cost)"\s*:/, endpoint);
     }
     assert.equal((await get(ctx.port, "/api/usage?by=year")).status, 400);
+    assert.equal((await get(ctx.port, "/api/cache?days=0")).status, 400);
+    assert.equal((await get(ctx.port, "/api/cache?days=abc")).status, 400);
+    assert.equal((await get(ctx.port, "/api/cache?days=7")).status, 200);
+    assert.equal((await get(ctx.port, "/api/cache?days=all")).status, 200);
     assert.equal((await get(ctx.port, "/api/nothing")).status, 404);
   });
 

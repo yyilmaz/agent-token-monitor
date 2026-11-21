@@ -4,7 +4,7 @@ import type { TokenSum, UsageFigures, UsagePeriod } from "../../../src/core/anal
 import type { usage } from "../../../src/core/api/index.js";
 import { harnessLabel, modelLabel } from "../badges.js";
 import { barChart } from "../chart.js";
-import { h } from "../dom.js";
+import { h, segmented } from "../dom.js";
 import * as f from "../format.js";
 
 type Usage = ReturnType<typeof usage>;
@@ -146,19 +146,6 @@ function filterPeriod(p: UsagePeriod, state: UsageState): UsagePeriod {
     };
   }
   return p;
-}
-
-function segmented(options: readonly (readonly [string, string])[], value: string, change: (value: string) => void): HTMLElement {
-  return h(
-    "div",
-    { class: "btn-group segmented", role: "group" },
-    options.map(([v, label]) => {
-      const active = v === value;
-      const button = h("button", { type: "button", class: active ? "btn btn-sm active" : "btn btn-sm", "aria-pressed": String(active) }, label);
-      button.addEventListener("click", () => change(v));
-      return button;
-    }),
-  );
 }
 
 /** Which harnesses are counted, and which are on this computer but not read yet, so nothing is left out silently (R-23). */

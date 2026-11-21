@@ -4,7 +4,7 @@ import type * as api from "../../src/core/api/index.js";
 import { ConfigErrors, getJson, isOfflineReport, onHostRefresh } from "./data.js";
 import { h, table } from "./dom.js";
 import { sweepCharts } from "./chart.js";
-import { renderCache } from "./views/cache.js";
+import { renderCache, type CacheState } from "./views/cache.js";
 import { renderDiagnostics, renderNow, type NowState } from "./views/now.js";
 import { renderSession } from "./views/session.js";
 import { renderUsage, type UsageState } from "./views/usage.js";
@@ -22,9 +22,10 @@ interface Response {
   readonly configuration: { readonly ui: { readonly pollIntervalSeconds: number } };
 }
 
-const state: { now: NowState; usage: UsageState } = {
+const state: { now: NowState; usage: UsageState; cache: CacheState } = {
   now: { harness: "", project: "" },
   usage: { range: 0, where: "harness", harness: "", project: "", chartModes: {} },
+  cache: { range: "all", harness: "" },
 };
 let timer: number | undefined;
 let generation = 0;
@@ -52,8 +53,12 @@ async function load(): Promise<Response> {
       return days;
     }
     case "cache": {
-      const data = await getJson<ReturnType<typeof api.cache>>("/api/cache");
-      show(renderCache(data));
+      const query = state.cache.range === "all" ? "" : `?days=${encodeURIComponent(String(state.cache.range))}`;
+      const data = await getJson<ReturnType<typeof api.cache>>(`/api/cache${query}`);
+      show(renderCache(data, state.cache, (next) => {
+        state.cache = next;
+        void refresh();
+      }));
       return data;
     }
     case "diagnostics": {

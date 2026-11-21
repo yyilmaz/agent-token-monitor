@@ -128,10 +128,16 @@ export function renderNow(data: Overview, state: NowState, onChange: (next: NowS
       [
         { title: "Session", cell: (r: TreeRow) => sessionCell(r, adviceById.get(r.sessionId)) },
         {
-          title: "Context",
-          help: "Current context size and recent 5-step weighted average load per step (and active window average since last compaction).",
+          title: "Step load",
+          help: "Recent 5-step weighted average load per step, with active window average since last compaction underneath.",
           numeric: true,
-          cell: (r) => contextCell(r, adviceById.get(r.sessionId), data.sessionLoads[r.sessionId]),
+          cell: (r) => stepLoadCell(data.sessionLoads[r.sessionId]),
+        },
+        {
+          title: "Context",
+          help: "Current context size of the session.",
+          numeric: true,
+          cell: (r) => contextCell(r, adviceById.get(r.sessionId)),
         },
         {
           title: "Total weighted",
@@ -277,29 +283,30 @@ function sessionCell(r: TreeRow, adv: SessionAdvice | undefined): HTMLElement {
   );
 }
 
-function contextCell(r: TreeRow, adv: SessionAdvice | undefined, load: SessionLoad | undefined): HTMLElement {
-  const ctx = r.open !== null ? r.open.contextTokens : (adv?.contextTokens ?? null);
-  const stepLoad =
-    load !== undefined && load.recentAvgWeightedTokens !== null
-      ? h(
-          "div",
-          { class: "mt-1" },
-          h(
-            "span",
-            {
-              class: "badge step-load-value",
-              title: `Recent avg: ${f.tokens(load.recentAvgWeightedTokens)} / step · Active window avg: ${f.tokens(load.activeWindowAvgWeightedTokens)} / step (${load.activeTurns} steps)`,
-            },
-            `${f.compactTokens(load.recentAvgWeightedTokens)}/step`,
-          ),
-        )
-      : null;
+function stepLoadCell(load: SessionLoad | undefined): HTMLElement {
+  if (load === undefined || load.recentAvgWeightedTokens === null) {
+    return h("span", { class: "muted" }, "—");
+  }
+  const recentTitle =
+    load.activeWindowAvgWeightedTokens !== null
+      ? `Recent avg: ${f.tokens(load.recentAvgWeightedTokens)} / step · Active window avg: ${f.tokens(load.activeWindowAvgWeightedTokens)} / step (${load.activeTurns} steps)`
+      : `Recent avg: ${f.tokens(load.recentAvgWeightedTokens)} / step`;
+  return h(
+    "div",
+    { class: "step-load-cell" },
+    h("span", { class: "badge step-load-value", title: recentTitle }, `${f.compactTokens(load.recentAvgWeightedTokens)}/step`),
+    load.activeWindowAvgWeightedTokens !== null
+      ? h("div", { class: "muted small mt-1", title: `${load.activeTurns} steps in active window` }, `avg ${f.compactTokens(load.activeWindowAvgWeightedTokens)}/step`)
+      : null,
+  );
+}
 
+function contextCell(r: TreeRow, adv: SessionAdvice | undefined): HTMLElement {
+  const ctx = r.open !== null ? r.open.contextTokens : (adv?.contextTokens ?? null);
   return h(
     "div",
     { class: "context-cell" },
     ctx === null ? h("span", { class: "muted" }, "—") : h("span", { title: `${f.tokens(ctx)} tokens` }, f.compactTokens(ctx)),
-    stepLoad,
   );
 }
 
