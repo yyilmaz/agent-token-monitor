@@ -402,15 +402,21 @@ function firstFileUriPath(value: unknown): string | null {
   return null;
 }
 
+const PBTXT_ESCAPES: Readonly<Record<string, string>> = {
+  "\\": "\\",
+  "\"": "\"",
+  "'": "'",
+  n: "\n",
+  r: "\r",
+  t: "\t",
+};
+
 function readAnnotation(file: LogFile, nativeId: string): { readonly nativeId: string; readonly title: string } | null {
   const text = file.lines.join("\n");
   const match = /\btitle\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(text);
   if (match === null) return null;
   const title = (match[1] as string)
-    .replace(/\\"/g, "\"")
-    .replace(/\\\\/g, "\\")
-    .replace(/\\n/g, "\n")
-    .replace(/\\t/g, "\t")
+    .replace(/\\([\\"'nrt])/g, (seq, ch: string) => PBTXT_ESCAPES[ch] ?? seq)
     .trim();
   return title === "" ? null : { nativeId, title };
 }

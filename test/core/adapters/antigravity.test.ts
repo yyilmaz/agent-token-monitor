@@ -211,14 +211,14 @@ describe("Antigravity adapter edge cases", () => {
     assert.deepEqual(parseAntigravity([link]).diagnostics.map((d) => d.code), ["invalidSubagentLink"]);
   });
 
-  it("reads conversation titles from .pbtxt annotation files (ADR 0016)", () => {
+  it("reads conversation titles from .pbtxt annotation files without double-unescaping (ADR 0016)", () => {
     const annotation: LogFile = {
       logRoot: "antigravityIndex:0",
       file: "c.pbtxt",
-      lines: ['title:"Example \\"Title\\"" last_user_view_time:{seconds:100 nanos:0}'],
+      lines: ['title:"Example \\"Title\\" \\\\n \\\\t \\\\\\" \\\'ok\\\'" last_user_view_time:{seconds:100 nanos:0}'],
     };
     const output = parseAntigravity([transcript("c", [planner({ input_tokens: 1, cache_read_tokens: 0, output_tokens: 2 })]), annotation]);
-    assert.equal(output.sessions[0]?.title, 'Example "Title"');
+    assert.equal(output.sessions[0]?.title, 'Example "Title" \\n \\t \\" \'ok\'');
   });
 
   it("falls back to typeName for subagent title, prefers .pbtxt if present, and ignores non-file URIs", () => {
